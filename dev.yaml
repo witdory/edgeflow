@@ -3,6 +3,8 @@ kind: Pod
 metadata:
   name: edgeflow-dev
   namespace: edgeflow-test
+  labels:
+    app: edgeflow-dev
 spec:
   nodeSelector:
     role: infra-core
@@ -39,3 +41,19 @@ spec:
           value: "redis-service"
         - name: GATEWAY_HOST
           value: "localhost" 
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: edgeflow-gateway-service
+  namespace: edgeflow-test
+spec:
+  type: NodePort
+  selector:
+    app: edgeflow-dev 
+  ports:
+    - name: http-gateway
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
+      nodePort: 30000
