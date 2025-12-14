@@ -1,4 +1,5 @@
 #edgeflow/core.py
+import sys
 import time
 import os
 import asyncio
@@ -47,7 +48,14 @@ class EdgeApp:
         return decorator
 
     # --- Runtime Entrypoint ---
-    def run(self, role):
+    def run(self, role = None):
+
+        if role is None:
+            if len(sys.argv) > 1:
+                role = sys.argv[1]
+            else:
+                role = "consumer"
+                
         redis_host = os.getenv("REDIS_HOST", "localhost")
         
         if role == "producer":
