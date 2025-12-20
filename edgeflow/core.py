@@ -9,6 +9,7 @@ from .comms import RedisBroker, GatewaySender
 import struct
 import numpy as np
 import cv2
+import inspect
 
 # 로거 설정
 logging.basicConfig(level=logging.INFO, format='[%(name)s] %(message)s')
@@ -139,7 +140,7 @@ class EdgeApp:
             # 1. 헤더 분리
             header = packet[:12]
             
-            # 2. 페이로드(데이터) 분리 및 구조 파싱
+            # 2. 페이로드(유저 커스텀 데이터) 분리 및 구조 파싱
             # Producer가 보낸 구조: [JSON_Len(4B)] + [JSON] + [Image]
             payload = packet[12:]
             
@@ -233,22 +234,28 @@ class EdgeApp:
         import uvicorn
         from fastapi import FastAPI
         from fastapi.responses import StreamingResponse, JSONResponse
-        
+        import asyncio
+
         app = FastAPI(title="EdgeFlow Gateway")
 
-        latest_meta = {}
+        # 1. 상태 관리 통합 (state 객체 하나로 통일)
+        state = {
+            "latest_packet": None, 
+            "meta": {},
+            "last_update_time": 0.0
+        }
         lock = asyncio.Lock()
-        
-        # [Stream 모드]
-        latest_packet = None
-        last_update_time = 0.0
 
-        # [Ordered 모드]
-        packet_buffer = [] 
-        
+        # 유저 핸들러 설정 (클래스면 setup, on_message 실행, 함수면 그대로 실행)
+        if inspect.isclass(self.gateway_func):
+            gateway_instance = self.gateway_func()
+            if hasattr(gateway_instance, 'setup'):
+                gateway_instance.setup()
+            handler = gateway_instance.on_message
+        else:
+            handler = self.gateway_func
+
         async def tcp_server(reader, writer):
-            nonlocal latest_packet, last_update_time 
-
             try:
                 while True:
                     len_bytes = await reader.readexactly(4)
@@ -257,93 +264,56 @@ class EdgeApp:
                     
                     header = data[:12]
                     frame_id, timestamp = struct.unpack('!Id', header)
-
                     json_len = struct.unpack('!I', data[12:16])[0]
-                    json_start = 16
-                    json_end = 16 + json_len
-                    
-                    if json_len > 0:
-                        try:
-                            meta_bytes = data[json_start:json_end]
-                            meta_dict = json.loads(meta_bytes.decode('utf-8'))
-                            latest_meta.update(meta_dict)
-                        except: pass
+                    meta_dict = json.loads(data[16:16+json_len].decode('utf-8'))
+                    image_bytes = data[16+json_len:]
 
-                    image_bytes = data[json_end:]
+                    # 유저 핸들러 실행
+                    processed_img = handler(image_bytes, meta_dict)
 
-                    if self.gateway_func:
-                        final_img = self.gateway_func(image_bytes)
-                    else:
-                        final_img = image_bytes
-
-                    if not final_img: continue
-
-                    current_time = time.time()
-
-                    # [수정] self.mode 사용
+                    # 2. 통합된 state 업데이트 및 시간 갱신
                     async with lock:
-                        if self.mode == "stream":
-                            latest_packet = final_img
-                            last_update_time = current_time
-                        
-                        elif self.mode == "ordered":
-                            heapq.heappush(packet_buffer, (timestamp, final_img))
-                            
-            except asyncio.IncompleteReadError:
-                pass
+                        if processed_img:
+                            state["latest_packet"] = processed_img
+                            state["last_update_time"] = time.time() # 시간 업데이트 필수
+                        state["meta"].update(meta_dict)
+
             except Exception as e:
                 logger.error(f"Gateway TCP Error: {e}")
+            finally:
+                writer.close()
 
         async def mjpeg_gen():
-            nonlocal latest_packet, last_update_time
             last_sent_time = 0.0
-
             while True:
                 frame_to_send = None
                 
-                # [수정] self.mode 사용
-                if self.mode == "stream":
-                    async with lock:
-                        if latest_packet is not None and last_update_time > last_sent_time:
-                            frame_to_send = latest_packet
-                            last_sent_time = last_update_time
-                    
-                    if frame_to_send:
-                        yield _wrap_mjpeg(frame_to_send)
-                        await asyncio.sleep(0.001)
-                    else:
-                        await asyncio.sleep(0.01)
-
-                elif self.mode == "ordered":
-                    now = time.time()
-                    async with lock:
-                        if packet_buffer:
-                            ts, _ = packet_buffer[0]
-                            if (now - ts) > self.gateway_buffer_size:
-                                _, frame_to_send = heapq.heappop(packet_buffer)
-                    
-                    if frame_to_send:
-                        yield _wrap_mjpeg(frame_to_send)
-                        await asyncio.sleep(1/30)
-                    else:
-                        await asyncio.sleep(0.01)
-
-        def _wrap_mjpeg(frame_bytes):
-            return (b'--frameboundary\r\n'
-                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                # 3. state에서 데이터를 가져오도록 수정
+                async with lock:
+                    if state["latest_packet"] is not None and state["last_update_time"] > last_sent_time:
+                        frame_to_send = state["latest_packet"]
+                        last_sent_time = state["last_update_time"]
+                
+                if frame_to_send:
+                    yield (b'--frameboundary\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_to_send + b'\r\n')
+                    await asyncio.sleep(0.001)
+                else:
+                    await asyncio.sleep(0.01) # 새로운 프레임 대기
 
         @app.get("/video_stream")
-        def stream():
+        async def stream():
             return StreamingResponse(mjpeg_gen(), media_type="multipart/x-mixed-replace; boundary=frameboundary")
         
         @app.get("/api/status")
-        def get_status():
-            return JSONResponse(content=latest_meta)
+        async def get_status():
+            async with lock:
+                return JSONResponse(content=state["meta"])
             
         @app.on_event("startup")
         async def startup():
+            # TCP 서버 시작 (포트 8080)
             asyncio.create_task(asyncio.start_server(tcp_server, '0.0.0.0', 8080))
 
-        # [수정] 로그에도 self.mode 출력
-        logger.info(f"📺 Gateway Started (Mode: {self.mode}, Port: {self.gateway_port})")
+        logger.info(f"📺 Gateway Started (Port: {self.gateway_port})")
         uvicorn.run(app, host="0.0.0.0", port=self.gateway_port)

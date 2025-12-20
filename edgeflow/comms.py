@@ -3,6 +3,7 @@ import redis
 import socket
 import time
 import os
+import struct
 
 class RedisBroker:
     def __init__(self, host='localhost', port=6379, key='video_stream'):
