@@ -5,7 +5,7 @@ import os
 import asyncio
 import logging
 import json
-from .comms import RedisBroker, GatewaySender
+from .comms import RedisBroker, GatewaySender, Frame
 import struct
 import numpy as np
 import cv2
@@ -128,58 +128,38 @@ class EdgeApp:
         logger.info(f"🧠 Consumer 시작 (Replicas: {self.replicas})")
 
         while True:
-            packet = broker.pop(timeout=1)
+            raw_packet = broker.pop(timeout=1)
             
-            if not packet: continue
-            if packet == b"EOF":
+            if not raw_packet: continue
+            if raw_packet == b"EOF":
                 logger.info("🛑 종료 신호(EOF) 수신.")
                 break
-            if len(packet) < 16: # 헤더(12) + JSON길이(4) = 최소 16바이트
+            if len(raw_packet) < 16: # 헤더(12) + JSON길이(4) = 최소 16바이트
                 continue
-
-            # 1. 헤더 분리
-            header = packet[:12]
-            
-            # 2. 페이로드(유저 커스텀 데이터) 분리 및 구조 파싱
             # Producer가 보낸 구조: [JSON_Len(4B)] + [JSON] + [Image]
-            payload = packet[12:]
-            
+
+            is_image = (self.input_type == "image")
+            frame = Frame.from_bytes(raw_packet, is_image=is_image)
+
+            if frame is None: continue
+
             try:
-                # JSON 길이 확인
-                json_len = struct.unpack('!I', payload[:4])[0]
-                json_start = 4
-                json_end = 4 + json_len
-                
-                # (옵션) Consumer도 Producer가 보낸 메타데이터를 쓰고 싶다면 여기서 json.loads 하면 됨
-                # producer_meta = json.loads(payload[json_start:json_end])
+                result = self.consumer_func(frame.data)
 
-                # 3. 순수 이미지 데이터 추출
-                image_bytes = payload[json_end:]
-
-                # 4. 이미지 디코딩
-                is_image_mode = (self.input_type == "image")
-                input_data = self._deserialize(image_bytes, as_image=is_image_mode)
-
-                if input_data is None:
-                    continue
-
-                # 5. 사용자 함수 실행
-                result = self.consumer_func(input_data)
-
-                if result is not None: 
+                if result is not None:
+                    # 유저 커스텀 consumer가 tuple을 리턴한다면 첫요소는 프레임데이터, 두번째 요소는 메타데이터
                     if isinstance(result, tuple) and len(result) == 2:
-                        out_frame, out_meta = result
+                        out_img, out_meta = result
                     else:
-                        out_frame, out_meta = result, {}
-
-                    # 타입 체크 (디버깅용)
-                    if not isinstance(out_frame, (np.ndarray, bytes)):
-                        logger.error(f"❌ Consumer 리턴 오류: 이미지가 아닌 {type(out_frame)} 반환됨. (cv2 함수 대입 실수 확인 필요)")
-                        continue
-
-                    final_data = self._serialize(out_frame, out_meta)
-                    sender.send(header + final_data)
-
+                        out_img, out_meta = result, {}
+            
+                    response_frame = Frame(
+                        frame_id = frame.frame_id,
+                        timestamp = frame.timestamp,
+                        meta = out_meta,
+                        data = out_img
+                    )
+                    sender.send(response_frame.to_bytes())
             except Exception as e:
                 logger.error(f"Consumer Logic Error: {e}")
 
@@ -260,23 +240,27 @@ class EdgeApp:
                 while True:
                     len_bytes = await reader.readexactly(4)
                     total_length = int.from_bytes(len_bytes, 'big')
-                    data = await reader.readexactly(total_length)
-                    
-                    header = data[:12]
-                    frame_id, timestamp = struct.unpack('!Id', header)
-                    json_len = struct.unpack('!I', data[12:16])[0]
-                    meta_dict = json.loads(data[16:16+json_len].decode('utf-8'))
-                    image_bytes = data[16+json_len:]
+                    payload = await reader.readexactly(total_length)
+
+                    frame = Frame.from_bytes(payload)
+                    if not frame: continue
 
                     # 유저 핸들러 실행
-                    processed_img = handler(image_bytes, meta_dict)
+                    processed_data = handler(frame.data, frame.meta)
 
-                    # 2. 통합된 state 업데이트 및 시간 갱신
-                    async with lock:
-                        if processed_img:
-                            state["latest_packet"] = processed_img
-                            state["last_update_time"] = time.time() # 시간 업데이트 필수
-                        state["meta"].update(meta_dict)
+                    # 4. [휴먼에러 방지] 결과가 넘파이든 바이트든 전송용(bytes)으로 강제 변환
+                    if processed_data is not None:
+                        final_bytes = None
+                        if isinstance(processed_data, np.ndarray):
+                            _, buf = cv2.imencode('.jpg', processed_data)
+                            final_bytes = buf.tobytes()
+                        elif isinstance(processed_data, bytes):
+                            final_bytes = processed_data
+                        
+                        async with lock:
+                            state["latest_packet"] = final_bytes # MJPEG용은 항상 bytes
+                            state["last_update_time"] = time.time()
+                            state["meta"].update(frame.meta)
 
             except Exception as e:
                 logger.error(f"Gateway TCP Error: {e}")
@@ -294,7 +278,7 @@ class EdgeApp:
                         frame_to_send = state["latest_packet"]
                         last_sent_time = state["last_update_time"]
                 
-                if frame_to_send:
+                if frame_to_send is not None:
                     yield (b'--frameboundary\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame_to_send + b'\r\n')
                     await asyncio.sleep(0.001)

@@ -4,6 +4,9 @@ import socket
 import time
 import os
 import struct
+import json
+import numpy as np
+import cv2
 
 class RedisBroker:
     def __init__(self, host='localhost', port=6379, key='video_stream'):
@@ -60,3 +63,46 @@ class GatewaySender:
             self.sock.close()
             self.sock = None
             return False
+
+
+class Frame:
+    def __init__(self, frame_id=0, timestamp=0.0, meta=None, data=None):
+        self.frame_id = frame_id
+        self.timestamp = timestamp
+        self.meta = meta or {}
+        self.data = data  # 사용자에게는 항상 Numpy(또는 Raw) 상태로 유지
+
+    @classmethod
+    def from_bytes(cls, raw_bytes, is_image=True):
+        """네트워크/Redis에서 온 바이트를 객체로 변환 (역직렬화)"""
+        if not raw_bytes or len(raw_bytes) < 16: return None
+        
+        try:
+            f_id, ts = struct.unpack('!Id', raw_bytes[:12])
+            json_len = struct.unpack('!I', raw_bytes[12:16])[0]
+            meta = json.loads(raw_bytes[16:16+json_len].decode('utf-8'))
+            payload = raw_bytes[16+json_len:]
+
+            if is_image and len(payload) > 0:
+                nparr = np.frombuffer(payload, np.uint8)
+                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if img is not None: payload = img
+                
+            return cls(frame_id=f_id, timestamp=ts, meta=meta, data=payload)
+        except Exception:
+            return None
+
+    def to_bytes(self):
+        """객체를 Redis/TCP 전송용 바이트로 변환 (직렬화)"""
+        # [핵심] 넘파이면 JPEG로, 이미 바이트면 그대로 처리 (자동 보정)
+        if isinstance(self.data, np.ndarray):
+            _, buf = cv2.imencode('.jpg', self.data)
+            data_bytes = buf.tobytes()
+        else:
+            data_bytes = self.data if isinstance(self.data, bytes) else b""
+
+        meta_bytes = json.dumps(self.meta).encode('utf-8')
+        header = struct.pack('!Id', self.frame_id, self.timestamp)
+        meta_header = struct.pack('!I', len(json_bytes))
+        
+        return header + meta_header + meta_bytes + data_bytes
