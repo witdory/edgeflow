@@ -22,7 +22,8 @@ class EdgeApp:
         self.consumer_func = None
         self.gateway_func = None
 
-        self.mode = "stream"
+        # self.mode = "stream"
+        self.max_redis_size = 1
         self.fps = 30
         self.replicas = 1
 
@@ -30,10 +31,10 @@ class EdgeApp:
         self.gateway_buffer_size = 0.0
 
     # --- Decorators ---
-    def producer(self, mode="stream", fps=30):
+    def producer(self, mode="stream", fps=30, queue_size=1):
         def decorator(func):
             self.producer_func = func
-            self.mode = mode
+            self.max_redis_size = queue_size
             self.fps = fps
             return func
         return decorator
@@ -80,39 +81,45 @@ class EdgeApp:
     # --- Internal Loops ---
     def _run_producer(self, host):
         broker = RedisBroker(host)
-        logger.info(f"🚀 Producer 시작 (Mode: {self.mode}, FPS: {self.fps})")
+        logger.info(f"🚀 Producer 시작 (REDIS_BUFFER: {self.max_redis_size}, FPS: {self.fps})")
         frame_id = 0
         while True:
             start = time.time()
             try:
                 raw_data = self.producer_func() # 사용자 함수 실행
+                if raw_data is None: break
 
-                # 데이터 소진 처리
-                if raw_data is None:
-                    if self.mode == "batch":
-                        logger.info("✅ Batch 완료. 종료 신호(EOF) 전송.")
-                        for _ in range(self.replicas): 
-                            broker.push(b"EOF")
-                        break
-                    else:
-                        logger.warning("⚠️ 스트림 끊김. 재시도...")
-                        time.sleep(1); 
-                        continue
+                # # 데이터 소진 처리
+                # if raw_data is None:
+                #     if self.mode == "batch":
+                #         logger.info("✅ Batch 완료. 종료 신호(EOF) 전송.")
+                #         for _ in range(self.replicas): 
+                #             broker.push(b"EOF")
+                #         break
+                #     else:
+                #         logger.warning("⚠️ 스트림 끊김. 재시도...")
+                #         time.sleep(1); 
+                #         continue
 
                 frame = Frame(frame_id=frame_id, timestamp=time.time(), data=raw_data)
                 packet = frame.to_bytes()
+                
+                
+                """ 
+                원래 redis list의 길이를 1로 고정하였으나, 
+                일시적 지연에 의해 fps가 떨어질때를 대비해 
+                2중 버퍼로 redis list의 길이를 조절할 수 있도록 함
+                """
+                broker.push(packet)
+                broker.trim(self.max_redis_size)
+                
 
                 frame_id += 1
                 elapsed = time.time() - start
+                time.sleep(max(0, (1.0/self.fps) - elapsed))
+            
 
-                if self.mode == "stream":
-                    broker.push(packet)
-                    broker.trim(1) # 최신 상태 유지
-                    time.sleep(max(0, (1.0/self.fps) - elapsed))
-                elif self.mode == "ordered":
-                    time.sleep(max(0, (1.0/self.fps) - elapsed))
-                elif self.mode == "batch"  :
-                    pass
+                
 
             except Exception as e:
                 logger.error(f"Producer User Function Error: {e}")
