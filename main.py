@@ -1,5 +1,5 @@
 #main.py
-from edgeflow import EdgeApp
+from edgeflow import EdgeApp, BaseGateway
 import time
 import numpy as np
 import cv2
@@ -22,7 +22,7 @@ def ai(frame):
     return frame, metadata
 
 @app.gateway(port=8000)
-class MySmartGateway:
+class MySmartGateway(BaseGateway):
     def setup(self):
         # ROS2 노드 초기화/연결
         print("Gateway 연결 준비 완료 (ROS2/HTTP 초기화 가능)")
