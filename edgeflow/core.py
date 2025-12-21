@@ -27,7 +27,7 @@ class EdgeApp:
         self.replicas = 1
 
         self.gateway_port = 8000
-        self.gateway_buffer_size = 0.5
+        self.gateway_buffer_size = 0.0
 
     # --- Decorators ---
     def producer(self, mode="stream", fps=30):
@@ -99,7 +99,7 @@ class EdgeApp:
                         time.sleep(1); 
                         continue
 
-                frame = Frame(frame_id=frame_id, data=raw_data)
+                frame = Frame(frame_id=frame_id, timestamp=time.time(), data=raw_data)
                 packet = frame.to_bytes()
 
                 frame_id += 1
@@ -169,18 +169,18 @@ class EdgeApp:
         from fastapi import FastAPI
         from fastapi.responses import StreamingResponse, JSONResponse
         import asyncio
+        import heapq    
 
         app = FastAPI(title="EdgeFlow Gateway")
 
         # 1. 상태 관리 통합 (state 객체 하나로 통일)
-        state = {
-            "latest_packet": None, 
-            "meta": {},
-            "last_update_time": 0.0
-        }
+
+        packet_buffer = []
+        state = {"meta": {}}
         lock = asyncio.Lock()
 
         # 유저 핸들러 설정 (클래스면 setup, on_message 실행, 함수면 그대로 실행)
+        gateway_instance = None
         if inspect.isclass(self.gateway_func):
             gateway_instance = self.gateway_func()
             if hasattr(gateway_instance, 'setup'):
@@ -213,8 +213,7 @@ class EdgeApp:
                         final_bytes = output_frame.get_data_bytes()
                         
                         async with lock:
-                            state["latest_packet"] = final_bytes # MJPEG용은 항상 bytes
-                            state["last_update_time"] = time.time()
+                            heapq.heappush(packet_buffer, (frame.timestamp, final_bytes))
                             state["meta"].update(frame.meta)
 
             except Exception as e:
@@ -223,22 +222,47 @@ class EdgeApp:
                 writer.close()
 
         async def mjpeg_gen():
-            last_sent_time = 0.0
+            last_sent_ts = 0.0
             while True:
+                now = time.time()
                 frame_to_send = None
                 
                 # 3. state에서 데이터를 가져오도록 수정
                 async with lock:
-                    if state["latest_packet"] is not None and state["last_update_time"] > last_sent_time:
-                        frame_to_send = state["latest_packet"]
-                        last_sent_time = state["last_update_time"]
+                    while packet_buffer:
+                        oldest_ts, _ = packet_buffer[0]
+                        deadline = now - self.gateway_buffer_size
+
+                        if oldest_ts < deadline - 0.05: #50ms 정도 마진
+                            heapq.heappop(packet_buffer)
+                        else:
+                            break
+
+                    while packet_buffer:
+                        oldest_ts, _ = packet_buffer[0]
+                        
+                        # 🚨 버퍼가 0이면 시간 비교 하지말고 무조건 통과
+                        should_play = (self.gateway_buffer_size == 0.0) or (oldest_ts <= now - self.gateway_buffer_size)
+
+                        if should_play:
+                            # 1. 최신 프레임이면 보냄
+                            if oldest_ts > last_sent_ts:
+                                _, frame_to_send = heapq.heappop(packet_buffer)
+                                last_sent_ts = oldest_ts
+                                break
+                            # 2. 이미 보낸 과거 프레임이면 버림
+                            else:
+                                heapq.heappop(packet_buffer)
+                        else:
+                            break
+
                 
                 if frame_to_send is not None:
                     yield (b'--frameboundary\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame_to_send + b'\r\n')
                     await asyncio.sleep(0.001)
                 else:
-                    await asyncio.sleep(0.01) # 새로운 프레임 대기
+                    await asyncio.sleep(1 / (self.fps * 2)) # 새로운 프레임 대기
 
         @app.get("/video_stream")
         async def stream():
