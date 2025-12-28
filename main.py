@@ -1,44 +1,38 @@
-#main.py
-from edgeflow import EdgeApp, BaseGateway
-import time
+from edgeflow import EdgeApp
+from edgeflow.nodes.producer import ProducerNode
+from edgeflow.nodes.consumer import ConsumerNode
+from edgeflow.nodes.gateway import GatewayNode  # [추가됨]
 import numpy as np
 import cv2
+import time
 
 app = EdgeApp("test-app")
 
-@app.producer(fps=10)
-def camera():
-    frame = np.random.randint(0, 255, (240, 320, 3), dtype=np.uint8)
-    return frame 
+# 1. Camera Producer
+@app.node(name="camera", type="producer", fps=10)
+class MyCamera(ProducerNode):
+    def produce(self):
+        frame = np.random.randint(0, 255, (240, 320, 3), dtype=np.uint8)
+        return frame
 
-@app.consumer(replicas=1)
-def ai(frame): 
-    cv2.putText(frame, "Processed", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-    metadata = {
-        "detected": True,
-        "count": 1,
-        "timestamp": time.time()
-    }
-    return frame, metadata
+# 2. AI Consumer
+@app.node(name="ai", type="consumer", replicas=1)
+class MyAI(ConsumerNode):
+    def process(self, frame):
+        cv2.putText(frame, "Class Mode!", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        return frame, {"detected": True, "ts": time.time()}
 
-@app.gateway(port=8000)
-class MySmartGateway(BaseGateway):
+# 3. Gateway (Class 방식) [추가됨]
+@app.node(name="gateway", type="gateway", port=8000)
+class MyGateway(GatewayNode):
     def setup(self):
-        # ROS2 노드 초기화/연결
-        print("Gateway 연결 준비 완료 (ROS2/HTTP 초기화 가능)")
-        # self.ros_pub = ROS2Publisher("/result")
-    
+        super().setup() # 필수: FastAPI 라우트 등록 등을 위해 부모 setup 호출
+        print("✅ Custom Gateway Setup Complete")
+
     def on_message(self, frame, meta):
-        """
-        Consumer로부터 데이터가 도착할 때마다 실행
-        frame: 이미지 바이트, meta: 결과 데이터 딕셔너리
-        """
+        # 메타데이터 확인용 로그
         if meta.get("detected"):
-            print(meta)
-            # self.ros_pub.publish(meta)
-        
-        # 리턴한 값은 Gateway의 MJPEG 스트림 화면에 표시됨
-        # 만약 화면에 표시하고 싶지 않으면 None 리턴
+            print(f"Alert: {meta}")
         return frame
 
 if __name__ == "__main__":
