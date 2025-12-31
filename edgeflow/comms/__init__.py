@@ -1,6 +1,6 @@
 #edgeflow/comms/__init__.py
+from .brokers import RedisBroker, BrokerInterface 
 from .frame import Frame
-from .broker import RedisBroker
 from .socket_client import GatewaySender
 
-__all__ = ["Frame", "RedisBroker", "GatewaySender"]
+__all__ = ["Frame", "RedisBroker", "BrokerInterface", "GatewaySender"]

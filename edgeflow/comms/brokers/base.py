@@ -1,4 +1,4 @@
-#edgeflow/comms/broker_interface.py
+#edgeflow/comms/brokers/base.py
 from abc import ABC, abstractmethod
 
 class BrokerInterface(ABC):
