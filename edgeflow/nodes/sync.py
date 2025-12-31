@@ -65,7 +65,7 @@ class SyncNode(BaseNode):
         best_frame = None
         min_diff = float('inf')
 
-        for frame in list(self.buffets[topic]):
+        for frame in list(self.buffers[topic]):
             diff = abs(frame.timestamp - target_ts)
             if diff <= self.slop:
                 if diff < min_diff:
