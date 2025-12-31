@@ -2,11 +2,13 @@ from edgeflow import EdgeApp
 from edgeflow.nodes.producer import ProducerNode
 from edgeflow.nodes.consumer import ConsumerNode
 from edgeflow.nodes.gateway import GatewayNode, WebInterface
+from edgeflow.nodes.sync import SyncNode
+from edgeflow.comms import RedisBroker
 import numpy as np
 import cv2
 import time
 
-app = EdgeApp("test-app")
+app = EdgeApp("test-app", broker=RedisBroker())
 
 # 1. Camera Producer
 @app.node(name="camera", type="producer", fps=10)

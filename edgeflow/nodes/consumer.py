@@ -4,10 +4,12 @@ from .base import BaseNode
 from ..comms import Frame, GatewaySender # 기존 TCP Sender 재사용
 
 class ConsumerNode(BaseNode):
-    def __init__(self, replicas=1):
-        super().__init__()
+    def __init__(self, broker, replicas=1):
+        super().__init__(broker=None)
         self.replicas = replicas
         self.sender = None
+        self.input_topic = "default"
+
 
     def setup(self):
         # 기존 TCP Sender 연결 로직
@@ -22,7 +24,7 @@ class ConsumerNode(BaseNode):
         print(f"🧠 Consumer started (Replicas: {self.replicas})")
         while self.running:
             # Redis에서 가져오기
-            packet = self.broker.pop(timeout=1)
+            packet = self.broker.pop(self.input_topic, timeout=1)
             if not packet: continue
 
             # 역직렬화

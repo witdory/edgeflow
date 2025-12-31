@@ -2,12 +2,13 @@
 import redis
 import time
 import os
+from .broker_interface import BrokerInterface
 
-class RedisBroker:
-    def __init__(self, host='localhost', port=6379, key='video_stream'):
+class RedisBroker(BrokerInterface):
+    def __init__(self, host='localhost', port=6379):
         self.host = host or os.getenv('REDIS_HOST', 'localhost')
         self.port = port or int(os.getenv('REDIS_PORT', 6379))
-        self.key = key
+
         self.redis = self._connect()
 
     def _connect(self):
@@ -22,26 +23,26 @@ class RedisBroker:
                 print(f"⚠️ Redis Connection Failed ({self.host}). Retrying in 3s...")
                 time.sleep(3)
 
-    def push(self, data):
+    def push(self, topic: str, data: bytes):
         """데이터 큐에 넣기 (Producer)"""
         if not data: return
         try:
-            self.redis.rpush(self.key, data)
+            self.redis.rpush(topic, data)
         except Exception as e:
             print(f"Redis Push Error: {e}")
 
-    def trim(self, size=1):
+    def trim(self, topic: str, size: int =1):
         """오래된 데이터 삭제 (메모리 관리)"""
         try:
-            self.redis.ltrim(self.key, -size, -1)
+            self.redis.ltrim(topic, -size, -1)
         except Exception:
             pass
 
-    def pop(self, timeout=0):
+    def pop(self, topic: str, timeout: int=0):
         """데이터 가져오기 (Consumer) - Blocking"""
         try:
             # blpop은 (key, value) 튜플을 반환하므로 value([1])만 리턴
-            res = self.redis.blpop(self.key, timeout=timeout)
+            res = self.redis.blpop(topic, timeout=timeout)
             return res[1] if res else None
         except Exception as e:
             print(f"Redis Pop Error: {e}")

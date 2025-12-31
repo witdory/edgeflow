@@ -7,7 +7,7 @@ class Config:
     # Redis 설정
     REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", 6379))
-    REDIS_KEY: str = os.getenv("REDIS_KEY", "edgeflow_stream")
+    REDIS_KEY: str = os.getenv("REDIS_KEY", "default")
 
     # Gateway 설정
     GATEWAY_HOST: str = os.getenv("GATEWAY_HOST", "localhost")

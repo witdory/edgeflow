@@ -6,8 +6,8 @@ from ...comms import Frame
 from ...config import settings
 
 class GatewayNode(BaseNode):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, broker=None):
+        super().__init__(broker)
         self.tcp_port = settings.GATEWAY_TCP_PORT
         self.interfaces = [] # 등록된 인터페이스 목록
 
@@ -45,7 +45,7 @@ class GatewayNode(BaseNode):
                 total_len = int.from_bytes(len_bytes, 'big')
                 payload = await reader.readexactly(total_len)
                 
-                frame = Frame.from_bytes(payload)
+                frame = Frame.from_bytes(payload, avoid_decode=True)
                 if not frame: continue
 
                 # 2. [핵심] 모든 인터페이스에게 데이터 전파 (Broadcasting)

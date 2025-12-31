@@ -3,9 +3,14 @@ import sys
 import argparse
 
 class EdgeApp:
-    def __init__(self, name="edgeflow-app"):
+    def __init__(self, name="edgeflow-app", broker=None):
         self.name = name
         self.nodes = {} # 등록된 노드 저장소
+        self.broker = broker
+
+        if self.broker is None:
+            pass
+
 
     def node(self, name, type, **kwargs):
         """[변경] 데코레이터가 이제 클래스를 등록합니다."""
@@ -15,6 +20,11 @@ class EdgeApp:
         return decorator
 
     def run(self):
+
+        #실행 시점에 브로커가 없으면 에러
+        if not self.broker:
+            raise RuntimeError("❌ Broker is not set! Initialize EdgeApp with a broker.")
+        
         # CLI 인자 파싱 (예: python main.py --node camera)
         parser = argparse.ArgumentParser()
         parser.add_argument("--node", help="Name of the node to run")
@@ -32,7 +42,7 @@ class EdgeApp:
             
             # 클래스 인스턴스화 및 실행
             # kwargs로 fps 등을 넘김
-            instance = info["cls"](**info["kwargs"])
+            instance = info["cls"](broker=self.broker, **info["kwargs"])
             instance.execute()
         else:
             print(f"Usage: python main.py --node [name]")
