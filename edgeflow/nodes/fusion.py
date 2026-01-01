@@ -2,7 +2,14 @@ from collections import deque
 from .base import BaseNode
 from ..comms import Frame
 
-class SyncNode(BaseNode):
+
+#**[검증 필요]**
+class FusionNode(BaseNode):
+    """
+    [FusionNode]
+    여러 토픽의 데이터를 구독하여, 타임스탬프(Timestamp) 기준으로 동기화(Sync)한 뒤
+    process() 메서드로 전달합니다.
+    """
     def __init__(self, broker, slop=0.1):
         super().__init__(broker)
         self.input_topics = []

@@ -1,6 +1,7 @@
 #edgeflow/nodes/gateway/core.py
 import asyncio
 import os
+import traceback
 from ..base import BaseNode
 from ...comms import Frame
 from ...config import settings
@@ -10,6 +11,8 @@ class GatewayNode(BaseNode):
         super().__init__(broker)
         self.tcp_port = settings.GATEWAY_TCP_PORT
         self.interfaces = [] # 등록된 인터페이스 목록
+        self.server = None
+        self.active_clients = set()
 
     def add_interface(self, interface):
         """플러그인 장착"""
@@ -38,12 +41,25 @@ class GatewayNode(BaseNode):
             print(f"  - Interface Prepared: {iface.__class__.__name__}")
 
     async def _tcp_handler(self, reader, writer):
+        addr = writer.get_extra_info('peername')
+        self.active_clients.add(addr)
+        print(f"🔌 Client Connected: {addr} | Active: {len(self.active_clients)}")
         try:
             while True:
-                # 1. TCP 데이터 수신 (기존 로직)
-                len_bytes = await reader.readexactly(4)
+                # 1. TCP 데이터 수신
+                try:
+                    #4바이트 길이 읽기
+                    len_bytes = await reader.readexactly(4)
+                except asyncio.IncompleteReadError:
+                    break
+
                 total_len = int.from_bytes(len_bytes, 'big')
-                payload = await reader.readexactly(total_len)
+                try:
+                    #본문 읽기
+                    payload = await reader.readexactly(total_len)
+                except asyncio.IncompleteReadError:
+                    break
+
                 
                 frame = Frame.from_bytes(payload, avoid_decode=True)
                 if not frame: continue
@@ -56,8 +72,12 @@ class GatewayNode(BaseNode):
 
         except Exception as e:
             print(f"Gateway TCP Error: {e}")
+            traceback.print_exec()
         finally:
+            self.active_clients.discard(addr)
+            print(f"❌ Client Disconnected: {addr} | Active: {len(self.active_clients)}")
             writer.close()
+            await writer.wait_closed()
 
     async def _run_async(self):
         # TCP 서버 태스크

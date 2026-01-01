@@ -5,21 +5,37 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, JSONResponse
 from .base import BaseInterface
+from collections import defaultdict
 from ....comms import Frame
+from ....utils.buffer import TimeJitterBuffer
 
 class WebInterface(BaseInterface):
-    def __init__(self, port=8000):
+    def __init__(self, port=8000, buffer_delay=0.2):
         self.port = port
         self.app = FastAPI(title="EdgeFlow Viewer")
         self.latest_frame = None
         self.latest_meta = {}
         self.lock = asyncio.Lock() # 동시성 제어
         self._custom_routes = []
-        
+
+        self.buffer_delay = buffer_delay
+        self.buffers = defaultdict(lambda: TimeJitterBuffer(buffer_delay=self.buffer_delay))
+
     def setup(self):
         # 라우트 등록
-        self.app.get("/video")(self.video_feed)
         self.app.get("/api/status")(self.get_status)
+        @self.app.get("/video")
+        async def video_feed_default():
+            return StreamingResponse(self.stream_generator("default"), media_type="multipart/x-mixed-replace; boundary=frameboundary")
+
+
+        @self.app.get("/video/{topic_name}")
+        async def video_feed_topic(topic_name: str):
+            return StreamingResponse(
+                self.stream_generator(topic_name), # URL에서 받은 토픽 전달
+                media_type="multipart/x-mixed-replace; boundary=frameboundary"
+            )
+        
         for r in self._custom_routes:
             self.app.add_api_route(
                 path=r["path"], 
@@ -33,11 +49,13 @@ class WebInterface(BaseInterface):
         # Gateway가 이 함수를 호출해서 데이터를 넣어줌
         async with self.lock:
             # 송출용으로 변환하여 저장 (가장 최신 1개만 유지)
-            # Frame 객체의 헬퍼 사용
-            self.latest_frame = frame.get_data_bytes()
+            topic = frame.meta.get("topic", "default")
+            self.buffers[topic].push(frame)
 
             if frame.meta:
-                self.latest_meta.update(frame.meta)
+                if topic not in self.latest_meta:
+                    self.latest_meta[topic] = {}
+                self.latest_meta[topic].update(frame.meta)
 
     def route(self, path, methods=["GET"]):
         def decorator(func):
@@ -50,21 +68,22 @@ class WebInterface(BaseInterface):
             return func
         return decorator
 
-    async def _gen(self):
+    async def stream_generator(self, topic):
         while True:
             data = None
             async with self.lock:
-                data = self.latest_frame
+                if topic in self.buffers:
+                    data = self.buffers[topic].pop()
+
             
             if data:
                 yield (b'--frameboundary\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + data + b'\r\n')
-                await asyncio.sleep(0.033) # 약 30FPS 제한
+                wait_time = 0.001 if self.buffer_delay == 0.0 else 0.01
+                await asyncio.sleep(wait_time) # 약 30FPS 제한
             else:
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.01)
 
-    async def video_feed(self):
-        return StreamingResponse(self._gen(), media_type="multipart/x-mixed-replace; boundary=frameboundary")
 
     async def get_status(self):
         async with self.lock:
