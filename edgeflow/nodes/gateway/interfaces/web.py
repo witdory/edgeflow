@@ -53,7 +53,9 @@ class WebInterface(BaseInterface):
             self.buffers[topic].push(frame)
 
             if frame.meta:
-                self.latest_meta.update(frame.meta)
+                if topic not in self.latest_meta:
+                    self.latest_meta[topic] = {}
+                self.latest_meta[topic].update(frame.meta)
 
     def route(self, path, methods=["GET"]):
         def decorator(func):

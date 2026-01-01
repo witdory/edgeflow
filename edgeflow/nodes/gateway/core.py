@@ -12,6 +12,7 @@ class GatewayNode(BaseNode):
         self.tcp_port = settings.GATEWAY_TCP_PORT
         self.interfaces = [] # 등록된 인터페이스 목록
         self.server = None
+        self.active_clients = set()
 
     def add_interface(self, interface):
         """플러그인 장착"""
@@ -41,6 +42,8 @@ class GatewayNode(BaseNode):
 
     async def _tcp_handler(self, reader, writer):
         addr = writer.get_extra_info('peername')
+        self.active_clients.add(addr)
+        print(f"🔌 Client Connected: {addr} | Active: {len(self.active_clients)}")
         try:
             while True:
                 # 1. TCP 데이터 수신
@@ -71,6 +74,8 @@ class GatewayNode(BaseNode):
             print(f"Gateway TCP Error: {e}")
             traceback.print_exec()
         finally:
+            self.active_clients.discard(addr)
+            print(f"❌ Client Disconnected: {addr} | Active: {len(self.active_clients)}")
             writer.close()
             await writer.wait_closed()
 
