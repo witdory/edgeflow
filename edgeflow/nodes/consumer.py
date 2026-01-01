@@ -4,7 +4,7 @@ from .base import BaseNode
 from ..comms import Frame, GatewaySender # 기존 TCP Sender 재사용
 
 class ConsumerNode(BaseNode):
-    def __init__(self, broker, replicas=1, input_topic="default", output_topic = "default"):
+    def __init__(self, broker, replicas=1, input_topic="default", output_topic="default"):
         super().__init__(broker=broker)
         self.replicas = replicas
         self.sender = None
