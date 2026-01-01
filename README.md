@@ -11,7 +11,7 @@ EdgeFlow는 **'최신 데이터 우선(Latest-first)'** 및 **'완전 분산(Ful
 
 ### 1. ⚡ 극한의 실시간성 (Latest-First & Tunable)
 * **최신 데이터 보장:** 제어 시스템에서 오래된 데이터는 무의미합니다. 시스템 과부하 시 큐에 쌓인 데이터를 과감히 버리고(Drop), **가장 최근 프레임**을 최우선으로 처리합니다.
-* **지연 vs 안정성 튜닝:** 사용자는 **`queue_size`**(Redis)와 **`buffer_delay`**(Gateway) 파라미터를 통해, 상황에 맞춰 **'Zero Latency'**와 **'Smooth Streaming'** 사이의 균형을 직접 조절할 수 있습니다.
+* **지연 vs 안정성 튜닝:** 사용자는 **`queue_size`**(Redis)와 **`buffer_delay`**(Gateway) 파라미터를 통해, 상황에 맞춰 **'Zero Latency'** 와 **'Smooth Streaming'** 사이의 균형을 직접 조절할 수 있습니다.
 
 ### 2. 📡 완전 분산 아키텍처 (Distributed & Stateless)
 * **물리적 분리:** Redis를 통해 데이터가 흐르므로, 카메라(Edge)와 AI 서버(GPU Server)가 서로 다른 머신에 있어도 완벽하게 동작합니다.
@@ -45,7 +45,7 @@ EdgeFlow는 **Producer(생산) ➡️ Consumer/Fusion(가공) ➡️ Gateway(소
 
 **1) 저장소 복제**
 ```bash
-git clone [https://github.com/witdory/edgeflow.git](https://github.com/your-username/edgeflow.git)
+git clone https://github.com/witdory/edgeflow.git
 cd edgeflow
 ```
 
@@ -204,7 +204,3 @@ Gateway 실행 시 콘솔에 사용 가능한 접속 주소가 표시됩니다.
 | `GET` | *(Custom)* | 사용자가 추가한 커스텀 API |
 
 ---
-
-## 📝 라이선스
-
-This project is licensed under the MIT License.
