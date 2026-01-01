@@ -5,6 +5,18 @@ import json
 import numpy as np
 import cv2
 
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (np.int_, np.intc, np.intp, np.int8,
+                            np.int16, np.int32, np.int64, np.uint8,
+                            np.uint16, np.uint32, np.uint64)):
+            return int(obj)
+        elif isinstance(obj, (np.float_, np.float16, np.float32, np.float64)):
+            return float(obj)
+        elif isinstance(obj, (np.ndarray,)):
+            return obj.tolist()
+        return json.JSONEncoder.default(self, obj)
+
 class Frame:
     """
     EdgeFlow 데이터 전송 표준 객체
@@ -85,21 +97,20 @@ class Frame:
         """Frame 객체 -> 네트워크 패킷(Bytes) 변환"""
         data_bytes = b""
 
-        # 1. 데이터 타입에 따른 처리
+        # 1. 데이터 타입 처리
         if isinstance(self.data, np.ndarray):
-            # Numpy 이미지는 JPEG 인코딩
             success, buf = cv2.imencode('.jpg', self.data)
             if success:
                 data_bytes = buf.tobytes()
         elif isinstance(self.data, bytes):
-            # 이미 bytes 상태라면 그대로 사용 (Gateway 재전송 시 효율 극대화)
             data_bytes = self.data
         
-        # 2. 메타데이터 직렬화
-        meta_bytes = json.dumps(self.meta).encode('utf-8')
+        # 2. 메타데이터 직렬화 (cls=NumpyEncoder 추가!)
+        # AI 결과값(score 등)이 Numpy 타입이어도 에러가 안 나게 처리
+        meta_bytes = json.dumps(self.meta, cls=NumpyEncoder).encode('utf-8')
         
-        # 3. 헤더 패킹 (!=Network Endian, I=4bytes uint, d=8bytes float)
-        header = struct.pack('!Id', self.frame_id, self.timestamp)
+        # 3. 헤더 패킹 (강제 형변환 적용 확인됨 ✅)
+        header = struct.pack('!Id', int(self.frame_id), float(self.timestamp))
         meta_len_header = struct.pack('!I', len(meta_bytes))
         
         return header + meta_len_header + meta_bytes + data_bytes

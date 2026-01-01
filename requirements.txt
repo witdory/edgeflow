@@ -1,0 +1,12 @@
+# 1. Core Processing
+numpy>=1.21.0
+
+# 2. Computer Vision
+opencv-contrib-python>=4.0.0
+
+# 3. Communication
+redis>=4.3.0
+
+# 4. Web Gateway
+fastapi>=0.95.0
+uvicorn>=0.20.0

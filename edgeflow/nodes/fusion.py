@@ -1,15 +1,9 @@
 from collections import deque
 from .base import BaseNode
 from ..comms import Frame
+import time
 
-
-#**[검증 필요]**
 class FusionNode(BaseNode):
-    """
-    [FusionNode]
-    여러 토픽의 데이터를 구독하여, 타임스탬프(Timestamp) 기준으로 동기화(Sync)한 뒤
-    process() 메서드로 전달합니다.
-    """
     def __init__(self, broker, slop=0.1):
         super().__init__(broker)
         self.input_topics = []
@@ -17,19 +11,21 @@ class FusionNode(BaseNode):
         self.slop = slop
         self.buffers = {}
 
+    def configure(self):
+        pass
+
     def setup(self):
-        """User Configure 실행 후 호출됨"""
-        self.buffers = {t: deque() for t in self.input_topics}
+        self.configure()
+        self.buffers = {t: deque(maxlen=50) for t in self.input_topics}
         print(f"🔗 SyncNode Listening on: {self.input_topics} -> Output: {self.output_topic}")
 
     def process(self, frames):
-        """사용자 구현 (frames: [frame_topic1, frame_topic2])"""
         raise NotImplementedError
     
     def run(self):
         while self.running:
             for topic in self.input_topics:
-                data = self.broker.pop(topic, timeout=0.1) # 짧은 타임아웃으로 모든 토픽을 빠르게 순회
+                data = self.broker.pop(topic, timeout=0.01)
                 if data:
                     frame = Frame.from_bytes(data)
                     if frame:
@@ -38,6 +34,21 @@ class FusionNode(BaseNode):
 
     def _try_sync(self):
         if not self.input_topics: return
+        # [DEBUG START] 현재 버퍼 상태 훔쳐보기
+        # debug_status = []
+        # for t in self.input_topics:
+        #     count = len(self.buffers[t])
+        #     if count > 0:
+        #         # 가장 오래된 데이터(0번)와 최신 데이터(-1번) 시간 확인
+        #         first_ts = self.buffers[t][0].timestamp
+        #         last_ts = self.buffers[t][-1].timestamp
+        #         debug_status.append(f"{t}: {count}개 ({first_ts:.2f} ~ {last_ts:.2f})")
+        #     else:
+        #         debug_status.append(f"{t}: 0개 (EMPTY)")
+        
+        # print(f"🔍 Buffer Status: { ' | '.join(debug_status) }")
+        # [DEBUG END]
+
 
         base_topic = self.input_topics[0]
         if not self.buffers[base_topic]:
@@ -47,39 +58,77 @@ class FusionNode(BaseNode):
         target_ts = base_frame.timestamp
 
         matched_frames = [base_frame]
+        all_matched = True
 
         for topic in self.input_topics[1:]:
             match = self._find_match(topic, target_ts)
             if match:
                 matched_frames.append(match)
             else:
-                #짝이 없으면 대기(타임아웃/drop 로직 필요)
-                break
-                
-        self.buffers[base_topic].popleft()
-        result = self.process(matched_frames)
-
-        if result and self.output_topic:
-            out_frame = result if isinstance(result, Frame) else Frame(result)
-
-            if 'topic' not in out_frame.meta:
-                out_frame.meta['topic'] = self.output_topic
+                all_matched = False
+                break 
+        
+        if all_matched:
+            # 1. 버퍼 정리
+            self.buffers[base_topic].popleft()
+            for i, topic in enumerate(self.input_topics[1:]):
+                self._remove_frame(topic, matched_frames[i+1])
             
-            self.broker.push(self.output_topic, out_frame.to_bytes())
+            # 2. 프로세스 실행
+            result = self.process(matched_frames)
 
+            # 3. 결과 전송 [이 부분이 핵심 수정됨!]
+            if result is not None and self.output_topic:
+                if isinstance(result, Frame):
+                    out_frame = result
+                else:
+                    # [수정 전] out_frame = Frame(result) <--- 이게 범인!
+                    # [수정 후] ID와 Timestamp는 물려받고, 데이터만 result로 채움
+                    out_frame = Frame(
+                        frame_id=base_frame.frame_id, 
+                        timestamp=base_frame.timestamp, 
+                        meta={}, 
+                        data=result
+                    )
+                
+                if 'topic' not in out_frame.meta:
+                    out_frame.meta['topic'] = self.output_topic
+                
+                self.broker.push(self.output_topic, out_frame.to_bytes())
+        else:
+            should_drop = False
+            
+            # 1. 다른 센서(라이다)의 가장 옛날 데이터가 이미 '미래'라면?
+            # -> 현재 카메라 프레임(과거)은 영원히 짝을 만날 수 없음 -> 즉시 삭제
+            for topic in self.input_topics[1:]:
+                if self.buffers[topic]:
+                    oldest_other_ts = self.buffers[topic][0].timestamp
+                    # 오차 범위를 넘어서 미래에 있다면
+                    if oldest_other_ts > (target_ts + self.slop):
+                        should_drop = True
+                        break
+            
+            # 2. 혹은 너무 오래된 데이터라면 (기존 타임아웃 로직 유지)
+            if time.time() - target_ts > (self.slop * 2):
+                should_drop = True
+
+            if should_drop:
+                # 가망 없는 프레임 과감하게 버림
+                self.buffers[base_topic].popleft()
+        
     def _find_match(self, topic, target_ts):
-        """오차 범위 내 가장 가까운 프레임 찾기 & 버퍼에서 제거"""
         best_frame = None
         min_diff = float('inf')
-
         for frame in list(self.buffers[topic]):
             diff = abs(frame.timestamp - target_ts)
             if diff <= self.slop:
                 if diff < min_diff:
                     min_diff = diff
                     best_frame = frame
-            
-        if best_frame:
-            self.buffers[topic].remove(best_frame)
-            return best_frame
-        return None
+        return best_frame
+    
+    def _remove_frame(self, topic, target_frame):
+        try:
+            self.buffers[topic].remove(target_frame)
+        except ValueError:
+            pass
