@@ -11,14 +11,14 @@ import time
 app = EdgeApp("test-app", broker=RedisBroker())
 
 # 1. Camera Producer
-@app.node(name="camera", type="producer", fps=10)
+@app.node(name="camera", type="producer", fps=10, topic="camera_raw")
 class MyCamera(ProducerNode):
     def produce(self):
         frame = np.random.randint(0, 255, (240, 320, 3), dtype=np.uint8)
         return frame
 
 # 2. AI Consumer
-@app.node(name="ai", type="consumer", replicas=1)
+@app.node(name="ai", type="consumer",input_topic="camera_raw", output_topic="ai_result", replicas=1)
 class MyAI(ConsumerNode):
     def process(self, frame):
         cv2.putText(frame, "Class Mode!", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
@@ -28,7 +28,7 @@ class MyAI(ConsumerNode):
 class MyHub(GatewayNode):
     def configure(self):
         # 1. 웹 인터페이스 생성
-        web = WebInterface(port=8000)
+        web = WebInterface(port=8000, buffer_delay=0.0)
         
         @web.route("/api/detected")
         async def check_detected():

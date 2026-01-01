@@ -4,11 +4,12 @@ from .base import BaseNode
 from ..comms import Frame, GatewaySender # 기존 TCP Sender 재사용
 
 class ConsumerNode(BaseNode):
-    def __init__(self, broker, replicas=1):
+    def __init__(self, broker, replicas=1, input_topic="default", output_topic = "default"):
         super().__init__(broker=broker)
         self.replicas = replicas
         self.sender = None
-        self.input_topic = "default"
+        self.input_topic = input_topic
+        self.output_topic = output_topic
 
 
     def setup(self):
@@ -21,7 +22,7 @@ class ConsumerNode(BaseNode):
         raise NotImplementedError
 
     def run(self):
-        print(f"🧠 Consumer started (Replicas: {self.replicas})")
+        print(f"🧠 Consumer started (Replicas: {self.replicas}), Input Topic: {self.input_topic}")
         while self.running:
             # Redis에서 가져오기
             packet = self.broker.pop(self.input_topic, timeout=1)
@@ -38,6 +39,9 @@ class ConsumerNode(BaseNode):
 
                 # 결과 처리 (Tuple or Data)
                 out_img, out_meta = result if isinstance(result, tuple) else (result, {})
+                if "topic" not in out_meta:
+                    out_meta["topic"] = self.output_topic
+
 
                 # Gateway 전송 (TCP)
                 resp = Frame(frame.frame_id, frame.timestamp, out_meta, out_img)

@@ -4,18 +4,18 @@ from .base import BaseNode
 from ..comms import Frame  # 기존 Frame 재사용
 
 class ProducerNode(BaseNode):
-    def __init__(self, broker, fps=30, queue_size=1):
+    def __init__(self, broker, fps=30, topic="default", queue_size=1):
         super().__init__(broker)
         self.fps = fps
         self.queue_size = queue_size
-        self.output_topic = "default"
+        self.output_topic = topic
 
     def produce(self):
         """사용자가 구현해야 할 메소드"""
         raise NotImplementedError
 
     def run(self):
-        print(f"🚀 Producer started (FPS: {self.fps}), Topic: {self.output_topic}")
+        print(f"🚀 Producer started (FPS: {self.fps}), Output Topic: {self.output_topic}")
         frame_id = 0
         while self.running:
             start = time.time()
