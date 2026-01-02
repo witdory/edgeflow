@@ -168,9 +168,9 @@ if __name__ == "__main__":
     app.link("sensor_fusion").to("gateway")
 
     print("\n✅ System Ready! Open your browser:")
-    print(f" - Raw Camera : http://localhost:8000/video/cam_main")
-    print(f" - AI Result  : http://localhost:8000/video/yolo_ai")
-    print(f" - Fusion     : http://localhost:8000/video/sensor_fusion")
+    print(f" - Raw Camera : http://localhost:{settings.GATEWAY_HTTP_PORT}/video/cam_main")
+    print(f" - AI Result  : http://localhost:{settings.GATEWAY_HTTP_PORT}/video/yolo_ai")
+    print(f" - Fusion     : http://localhost:{settings.GATEWAY_HTTP_PORT}/video/sensor_fusion")
     print("\nStarting EdgeFlow... (Press Ctrl+C to stop)")
     
     app.run()
