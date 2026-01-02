@@ -4,11 +4,11 @@ from .base import BaseNode
 from ..comms import Frame
 
 class SequencerNode(BaseNode):
-    def __init__(self, broker):
+    def __init__(self, broker, buffer_size=30):
         super().__init__(broker)
         self.buffer = [] # 최소 힙 (Min-Heap)
         self.next_frame_id = 0
-        self.buffer_size = 30 # 너무 오래된 건 버리기 위해
+        self.buffer_size = buffer_size # 너무 오래된 건 버리기 위해
 
     def process(self, frame):
         # 1. 버퍼에 저장 (frame_id 기준 정렬)
