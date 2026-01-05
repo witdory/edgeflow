@@ -9,6 +9,8 @@ from edgeflow.nodes import ProducerNode, ConsumerNode, FusionNode, GatewayNode
 from edgeflow.nodes.gateway.interfaces.web import WebInterface
 from edgeflow.comms import RedisBroker
 from edgeflow.config import settings
+from fastapi.responses import HTMLResponse, JSONResponse
+from pathlib import Path
 
 # 앱 초기화
 app = EdgeApp("test-system", broker=RedisBroker())
@@ -17,7 +19,7 @@ app = EdgeApp("test-system", broker=RedisBroker())
 # 1. Producer (데이터 생성)
 # ====================================================
 
-@app.node(name="cam_main", type="producer", fps=30, queue_size=1)
+@app.node(name="cam_main", type="producer", fps=30)
 class Camera(ProducerNode):
     def produce(self):
         # [테스트용] 움직이는 공이 있는 더미 영상 생성
@@ -38,7 +40,7 @@ class Camera(ProducerNode):
         return img
 
 
-@app.node(name="lidar_sensor", type="producer", fps=10, queue_size=1)
+@app.node(name="lidar_sensor", type="producer", fps=10)
 class Lidar(ProducerNode):
     def produce(self):
         # 1. 360도 회전하는 각도 계산 (시간 기반)
@@ -140,11 +142,31 @@ class DepthFusion(FusionNode):
 @app.node(name="gateway", type="gateway")
 class CentralHub(GatewayNode):
     def configure(self):
-        # 웹 인터페이스 설정 (브라우저 접속 포트)
-        # buffer_delay를 0으로 두어 최대한 실시간성 확보
-        web = WebInterface(port=settings.GATEWAY_HTTP_PORT, buffer_delay=0.0)
+        # 웹 인터페이스 설정 (성능을 위해 비디오나 메트릭을 끌 수 있음)
+        web = WebInterface(
+            port=settings.GATEWAY_HTTP_PORT, 
+            buffer_delay=0.0,
+            enable_video=True,
+            enable_metrics=True,
+        )
         self.add_interface(web)
 
+
+        # 사용자 정의 FPS API 엔드포인트
+        @web.route("/api/fps")
+        async def get_fps_data():
+            latest_metrics = await self.get_latest_metrics()
+            fps_data = {
+                node: metrics.get("fps", 0) 
+                for node, metrics in latest_metrics.items()
+            }
+            return JSONResponse(content=fps_data)
+
+        # 대시보드 HTML을 직접 서빙하는 엔드포인트
+        @web.route("/metrics_dashboard")
+        async def metrics_dashboard():
+            html_content = Path("metrics_viewer.html").read_text()
+            return HTMLResponse(content=html_content)
 # ====================================================
 # 5. 배선 및 실행 (Wiring)
 # ====================================================
@@ -171,6 +193,7 @@ if __name__ == "__main__":
     print(f" - Raw Camera : http://localhost:{settings.GATEWAY_HTTP_PORT}/video/cam_main")
     print(f" - AI Result  : http://localhost:{settings.GATEWAY_HTTP_PORT}/video/yolo_ai")
     print(f" - Fusion     : http://localhost:{settings.GATEWAY_HTTP_PORT}/video/sensor_fusion")
+    print(f" - Metrics Dashboard: http://localhost:{settings.GATEWAY_HTTP_PORT}/metrics_dashboard")
     print("\nStarting EdgeFlow... (Press Ctrl+C to stop)")
     
     app.run()

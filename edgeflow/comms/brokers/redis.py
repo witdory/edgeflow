@@ -47,3 +47,10 @@ class RedisBroker(BrokerInterface):
         except Exception as e:
             print(f"Redis Pop Error: {e}")
             return None
+
+    def publish(self, channel: str, message: str):
+        """Publish a message to a pub/sub channel."""
+        try:
+            self.redis.publish(channel, message)
+        except Exception as e:
+            print(f"Redis Publish Error: {e}")

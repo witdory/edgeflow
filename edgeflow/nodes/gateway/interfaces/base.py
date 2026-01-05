@@ -2,6 +2,11 @@
 from abc import ABC, abstractmethod
 
 class BaseInterface(ABC):
+    def __init__(self):
+        self.broker = None
+        self.edge_app = None
+        self.gateway = None
+
     @abstractmethod
     def setup(self):
         """초기화 작업 (예: ROS 노드 생성, DB 연결)"""

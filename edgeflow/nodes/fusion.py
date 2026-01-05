@@ -4,8 +4,8 @@ from ..comms import Frame
 import time
 
 class FusionNode(BaseNode):
-    def __init__(self, broker, slop=0.1):
-        super().__init__(broker)
+    def __init__(self, broker, app, slop=0.1, **kwargs):
+        super().__init__(broker=broker, app=app, **kwargs)
         self.input_topics = []
         self.output_topic = None
         self.slop = slop
@@ -23,6 +23,7 @@ class FusionNode(BaseNode):
         raise NotImplementedError
     
     def run(self):
+        last_metric_publish_time = time.time() # For periodic metrics publishing
         while self.running:
             for topic in self.input_topics:
                 data = self.broker.pop(topic, timeout=0.01)
@@ -30,7 +31,17 @@ class FusionNode(BaseNode):
                     frame = Frame.from_bytes(data)
                     if frame:
                         self.buffers[topic].append(frame)
+            
+            # --- Metrics Start ---
+            # FusionNode FPS and Latency measurement happens inside _try_sync after a successful fusion
+            # --- Metrics End ---
             self._try_sync()
+
+            # --- Publish Metrics periodically ---
+            current_time = time.time()
+            if current_time - last_metric_publish_time > self.metrics_interval_sec:
+                self._publish_metrics()
+                last_metric_publish_time = current_time
 
     def _try_sync(self):
         if not self.input_topics: return
@@ -74,8 +85,16 @@ class FusionNode(BaseNode):
             for i, topic in enumerate(self.input_topics[1:]):
                 self._remove_frame(topic, matched_frames[i+1])
             
-            # 2. 프로세스 실행
+            # 2. 프로세스 실행 (and measure processing latency)
+            process_start_time = time.time()
             result = self.process(matched_frames)
+            process_end_time = time.time()
+            
+            # --- Metrics Collection for FusionNode ---
+            self._start_frame_timer() # For FPS
+            self._record_latency('processing', process_end_time - process_start_time)
+            self._record_latency('end_to_end', process_end_time - base_frame.timestamp)
+            # --- End Metrics Collection ---
 
             # 3. 결과 전송
             if result is not None:

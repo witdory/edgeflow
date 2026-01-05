@@ -1,6 +1,8 @@
 #edgeflow/core.py
 import sys
 import argparse
+import time
+import threading
 from .handlers import RedisHandler, TcpHandler
 from .config import settings
 
@@ -27,8 +29,8 @@ class Linker:
 
         # 2. Target이 일반 노드(Redis)인 경우 -> RedisHandler 주입
         else:
-            # 토픽 자동 생성: source_to_target
-            topic = f"{self.source.name}_to_{target.name}"
+            # 토픽 자동 생성: app_name:source_to_target
+            topic = f"{self.app.name}:{self.source.name}_to_{target.name}"
             
             # [Target 설정] 받는 쪽은 토픽을 구독해야 함
             target.input_topics.append(topic)
@@ -49,15 +51,23 @@ import argparse
 import threading
 
 class EdgeApp:
-    def __init__(self, name, broker):
+    def __init__(self, name, broker, profile="default"):
         self.name = name
         self.broker = broker
         self.nodes = {} # {name: instance}
+        self.profile = profile
 
     def node(self, name, type="producer", **kwargs):
         def decorator(cls):
+            # Apply profile-based queue_size only if not specified by the user
+            if 'queue_size' not in kwargs:
+                if self.profile == "realtime":
+                    kwargs["queue_size"] = 1
+                else:
+                    kwargs["queue_size"] = 10 # Default queue size
+
             # 1. 인스턴스를 미리 생성 (Linker를 위해 필수)
-            instance = cls(broker=self.broker, **kwargs)
+            instance = cls(broker=self.broker, app=self, **kwargs)
             instance.name = name
             # 2. 딕셔너리에 저장
             self.nodes[name] = instance
@@ -99,7 +109,15 @@ class EdgeApp:
                 threads.append(t)
             
             try:
-                # 메인 스레드는 대기
-                for t in threads: t.join()
+                # Keep main thread alive while node threads are running
+                while any(t.is_alive() for t in threads):
+                    time.sleep(0.1)
             except KeyboardInterrupt:
-                print("\n👋 App Shutdown")
+                print("\n👋 App Shutdown signal received, stopping nodes...")
+                for node in self.nodes.values():
+                    node.running = False # Tell all node loops to stop
+                
+                # Wait for all threads to finish
+                for t in threads:
+                    t.join()
+                print("✅ All nodes have been stopped.")

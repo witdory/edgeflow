@@ -10,8 +10,11 @@ from ....comms import Frame
 from ....utils.buffer import TimeJitterBuffer
 
 class WebInterface(BaseInterface):
-    def __init__(self, port=8000, buffer_delay=0.2):
+    def __init__(self, port=8000, buffer_delay=0.2, enable_video=True, enable_metrics=True):
+        super().__init__()
         self.port = port
+        self.enable_video = enable_video
+        self.enable_metrics = enable_metrics
         self.app = FastAPI(title="EdgeFlow Viewer")
         self.latest_frame = None
         self.latest_meta = {}
@@ -23,18 +26,22 @@ class WebInterface(BaseInterface):
 
     def setup(self):
         # 라우트 등록
-        self.app.get("/api/status")(self.get_status)
-        @self.app.get("/video")
-        async def video_feed_default():
-            return StreamingResponse(self.stream_generator("default"), media_type="multipart/x-mixed-replace; boundary=frameboundary")
+        if self.enable_metrics:
+            self.app.get("/api/metrics")(self.get_metrics)
+
+        if self.enable_video:
+            self.app.get("/api/status")(self.get_status)
+            @self.app.get("/video")
+            async def video_feed_default():
+                return StreamingResponse(self.stream_generator("default"), media_type="multipart/x-mixed-replace; boundary=frameboundary")
 
 
-        @self.app.get("/video/{topic_name}")
-        async def video_feed_topic(topic_name: str):
-            return StreamingResponse(
-                self.stream_generator(topic_name), # URL에서 받은 토픽 전달
-                media_type="multipart/x-mixed-replace; boundary=frameboundary"
-            )
+            @self.app.get("/video/{topic_name}")
+            async def video_feed_topic(topic_name: str):
+                return StreamingResponse(
+                    self.stream_generator(topic_name), # URL에서 받은 토픽 전달
+                    media_type="multipart/x-mixed-replace; boundary=frameboundary"
+                )
         
         for r in self._custom_routes:
             self.app.add_api_route(
@@ -46,6 +53,9 @@ class WebInterface(BaseInterface):
         print(f"🌍 WebInterface prepared on port {self.port}")
 
     async def on_frame(self, frame):
+        if not self.enable_video:
+            return
+            
         # Gateway가 이 함수를 호출해서 데이터를 넣어줌
         async with self.lock:
             # 송출용으로 변환하여 저장 (가장 최신 1개만 유지)
@@ -84,6 +94,11 @@ class WebInterface(BaseInterface):
             else:
                 await asyncio.sleep(0.01)
 
+
+    async def get_metrics(self):
+        async with self.gateway.metrics_lock:
+            # Return a copy of the latest metrics
+            return JSONResponse(content=dict(self.gateway.latest_metrics))
 
     async def get_status(self):
         async with self.lock:
