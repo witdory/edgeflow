@@ -13,6 +13,8 @@ dependencies = [
     "docker",
     "numpy",
     "opencv-python",
+    "fastapi",
+    "uvicorn",
 ]
 
 [project.scripts]
