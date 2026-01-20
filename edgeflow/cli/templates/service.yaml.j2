@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ name }}-svc
+  labels:
+    app: {{ name }}
+spec:
+  type: NodePort  # 외부 접속 허용
+  selector:
+    app: {{ name }}
+  ports:
+    - protocol: TCP
+      port: {{ port }}
+      targetPort: {{ port }}
+      {% if node_port %}
+      nodePort: {{ node_port }}
+      {% endif %}

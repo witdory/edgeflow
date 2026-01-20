@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ name | replace('_', '-') }}
+  labels:
+    app: {{ name }}
+spec:
+  replicas: {{ replicas }}
+  selector:
+    matchLabels:
+      app: {{ name }}
+  template:
+    metadata:
+      labels:
+        app: {{ name }}
+    spec:
+      containers:
+        - name: main
+          image: {{ image }}
+          command: ["python", "main.py", "--node", "{{ name }}"]
+          imagePullPolicy: Always
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            {# deployer.py에서 전달받은 환경변수 동적 주입 #}
+            {% if env_vars %}
+            {% for key, value in env_vars.items() %}
+            - name: {{ key }}
+              value: "{{ value }}"
+            {% endfor %}
+            {% endif %}
+          
+          {# GPU나 카메라가 필요하면 Privileged 모드 활성화 #}
+          {% if device in ['camera', 'gpu', 'lidar'] %}
+          securityContext:
+            privileged: true
+          {% endif %}
+
+          {# 리소스 요청 (GPU) #}
+          {% if device == 'gpu' %}
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          {% endif %}
+
+      {# 노드 셀렉터: 사용자가 지정한 device 라벨이 있는 노드로 감 #}
+      {% if device %}
+      nodeSelector:
+        edgeflow.io/device: {{ device }}
+      {% endif %}

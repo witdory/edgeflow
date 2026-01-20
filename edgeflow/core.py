@@ -36,13 +36,11 @@ class Linker:
             limit = getattr(self.source, 'queue_size', 1)
             handler = RedisHandler(self.app.broker, topic, queue_size=limit)
             # [Source 설정] 보내는 쪽은 토픽으로 쏴야 함
-            handler = RedisHandler(self.app.broker, topic)
+            # handler = RedisHandler(self.app.broker, topic)
             self.source.output_handlers.append(handler)
             print(f"🔗 [Queue] {self.source.name} --(Redis)--> {target.name} (Topic: {topic})")
 
         return Linker(self.app, target)
-
-# edgeflow/core.py
 
 import sys
 import argparse
@@ -54,11 +52,13 @@ class EdgeApp:
         self.broker = broker
         self.nodes = {} # {name: instance}
 
-    def node(self, name, type="producer", **kwargs):
+    def node(self, name, type="producer", replicas=1, device=None, **kwargs):
         def decorator(cls):
             # 1. 인스턴스를 미리 생성 (Linker를 위해 필수)
             instance = cls(broker=self.broker, **kwargs)
             instance.name = name
+            instance.device = device
+            instance.replicas = replicas
             # 2. 딕셔너리에 저장
             self.nodes[name] = instance
             return cls
@@ -82,7 +82,7 @@ class EdgeApp:
         # [Mode 1: 분산 실행] python main.py --node cam
         if target_name:
             if target_name in self.nodes:
-                print(f"▶️ [Distributed Mode] Launching single node: {target_name}")
+                print(f"▶️ [Distributed] Launching single node: {target_name}")
                 node = self.nodes[target_name]
                 node.execute() # 블로킹 실행 (하나만 도니까)
             else:
@@ -90,7 +90,7 @@ class EdgeApp:
 
         # [Mode 2: 통합 시뮬레이션] python main.py
         else:
-            print(f"▶️ [Simulation Mode] Launching ALL nodes ({len(self.nodes)})")
+            print(f"▶️ [Local] Launching ALL nodes ({len(self.nodes)})")
             threads = []
             for name, node in self.nodes.items():
                 # 스레드로 감싸서 실행
