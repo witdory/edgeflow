@@ -52,8 +52,17 @@ def deploy_to_k8s(app, image_tag):
         with open(svc_tpl_path) as f:
             svc_template = Template(f.read())
 
-    # K8s 연결
-    config.load_kube_config()
+    # K8s 연결 (K3s 자동 감지 포함)
+    try:
+        config.load_kube_config()
+    except Exception:
+        # K3s 전용 경로 시도
+        k3s_config = "/etc/rancher/k3s/k3s.yaml"
+        if os.path.exists(k3s_config):
+            print(f"📁 Using K3s config: {k3s_config}")
+            config.load_kube_config(config_file=k3s_config)
+        else:
+            raise Exception("kubeconfig not found. Run: sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config")
     k8s_apps = client.AppsV1Api()
     k8s_core = client.CoreV1Api()
 
