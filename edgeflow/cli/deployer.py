@@ -3,7 +3,7 @@ import yaml
 import datetime
 from jinja2 import Template
 from kubernetes import client, config
-from edgeflow.constants import INTERNAL_REDIS_HOST, INTERNAL_REDIS_PORT # 상수 임포트 필수
+from edgeflow.constants import REDIS_HOST, REDIS_PORT # 상수 임포트 필수
 
 def ensure_infrastructure(k8s_apps, k8s_core):
     """
