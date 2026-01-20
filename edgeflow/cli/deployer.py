@@ -1,3 +1,4 @@
+import time
 import os
 import yaml
 import datetime
@@ -109,6 +110,8 @@ def deploy_to_k8s(app, image_tag, namespace="default"):
             env_vars={
                 "REDIS_HOST": f"{REDIS_HOST}.{namespace}.svc.cluster.local", # 네임스페이스 포함 DNS
                 "REDIS_PORT": str(REDIS_PORT),
+                "GATEWAY_HOST": f"gateway-svc.{namespace}.svc.cluster.local", # [신규] Gateway 주소 주입
+                "GATEWAY_TCP_PORT": "8080", # [원복] TCP 포트 8080 고정
                 "NODE_NAME": name
             }
         )
@@ -149,7 +152,25 @@ def deploy_to_k8s(app, image_tag, namespace="default"):
                 print(f"  + [Svc] Exposed Gateway: http://<NODE-IP>{port_msg}")
             except client.exceptions.ApiException as e:
                 if e.status == 409:
-                    # 서비스는 보통 설정이 잘 안 바뀌므로 패스하거나 patch
-                    print(f"  . [Svc] Gateway service already exists.")
+                    # 서비스 설정 변경(포트 등) 반영을 위해 과감하게 재생성 (개발 편의성)
+                    print(f"  🔄 Service exists. Re-creating to apply changes...")
+                    k8s_core.delete_namespaced_service(name=svc_manifest['metadata']['name'], namespace=namespace)
+                    config.time.sleep(1) # 삭제 대기
+                    k8s_core.create_namespaced_service(namespace=namespace, body=svc_manifest)
+                    port_msg = f":{gateway_node_port}" if gateway_node_port else " (auto-assigned)"
+                    print(f"  + [Svc] Re-created Gateway Service: http://<NODE-IP>{port_msg}")
+                # [신규] 포트 충돌(422) 시 강제 삭제 후 재생성 시도
+                elif e.status == 422 and "provided port is already allocated" in str(e.body):
+                    print(f"  ⚠️ Port {gateway_node_port} conflict detected. Deleting existing service...")
+                    try:
+                        # 기존 서비스 삭제 (이름으로 삭제)
+                        k8s_core.delete_namespaced_service(name=svc_manifest['metadata']['name'], namespace=namespace)
+                        print("  🗑️ Debug: Deleted conflicting service.")
+                        # 잠시 대기 후 재생성
+                        k8s_core.create_namespaced_service(namespace=namespace, body=svc_manifest)
+                        print(f"  + [Svc] Re-created Gateway Service on port {gateway_node_port}")
+                    except Exception as retry_e:
+                        print(f"  ❌ Failed to resolve port conflict: {retry_e}")
+                        raise retry_e
                 else:
                     raise e
