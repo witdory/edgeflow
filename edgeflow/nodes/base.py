@@ -35,6 +35,11 @@ class BaseNode(ABC):
             self.teardown()
 
     def setup(self):
+        """초기화 로직 (User Hook 포함)"""
+        self.configure()
+
+    def configure(self):
+        """[User Hook] 사용자가 오버라이드하여 초기화 로직 구현"""
         pass
 
     @abstractmethod
