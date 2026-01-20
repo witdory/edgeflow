@@ -1,4 +1,5 @@
 import argparse
+import datetime
 from .cli.inspector import inspect_app
 from .cli.builder import build_and_push
 from .cli.deployer import deploy_to_k8s
@@ -18,7 +19,9 @@ def main():
         print(f"🔍 Inspecting {args.file}...")
         app = inspect_app(args.file)
         
-        image_tag = f"{args.registry}/edgeflow-app:latest"
+        # 태그: 타임스탬프로 매 배포마다 고유한 이미지 생성
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        image_tag = f"{args.registry}/edgeflow-app:{timestamp}"
         
         print(f"🐳 Building & Pushing Image ({image_tag})...")
         build_and_push(image_tag)
