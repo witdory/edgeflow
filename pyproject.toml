@@ -7,15 +7,16 @@ name = "edgeflow"
 version = "0.1.0"
 description = "Kubernetes & Redis 기반 엣지 AI 분산 처리 프레임워크"
 dependencies = [
-    "typer[all]",
     "redis",
+    "kubernetes",
     "jinja2",
-    "fastapi",
-    "uvicorn",
+    "docker",
+    "numpy",
+    "opencv-python",
 ]
 
 [project.scripts]
-edgeflow = "edgeflow.cli:app"
+edgeflow = "edgeflow.__main__:main"
 
 [tool.setuptools.package-data]
-edgeflow = ["templates/*.j2"]
+edgeflow = ["templates/*.j2", "cli/templates/*.j2"]
