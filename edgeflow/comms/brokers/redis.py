@@ -5,7 +5,7 @@ import os
 from .base import BrokerInterface
 
 class RedisBroker(BrokerInterface):
-    def __init__(self, host='localhost', port=6379):
+    def __init__(self, host=None, port=None):
         self.host = host or os.getenv('REDIS_HOST', 'localhost')
         self.port = port or int(os.getenv('REDIS_PORT', 6379))
         self._redis = None  # Lazy: 아직 연결 안 함
