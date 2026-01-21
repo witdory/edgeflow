@@ -7,6 +7,7 @@ class BaseNode(ABC):
     def __init__(self, broker=None, **kwargs):
         self.running = True
         self.__dict__.update(kwargs) # 메타데이터(node_port 등) 저장
+        self.hostname = os.getenv("HOSTNAME", "localhost") # [신규] 노드 호스트명 식별자
         host = os.getenv("REDIS_HOST", "localhost")
         self.broker = broker  # 기존 comms.py의 RedisBroker 그대로 사용
 
