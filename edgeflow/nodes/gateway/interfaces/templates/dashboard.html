@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>EdgeFlow Dashboard</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #eee;
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        h1 {
+            color: #00d4ff;
+            text-align: center;
+            margin-bottom: 30px;
+            text-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+        }
+
+        .grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+        }
+
+        .card {
+            background: rgba(22, 33, 62, 0.9);
+            border-radius: 16px;
+            padding: 15px;
+            width: 400px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(0, 212, 255, 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 40px rgba(0, 212, 255, 0.2);
+        }
+
+        .card h3 {
+            margin: 0 0 12px 0;
+            color: #00d4ff;
+            font-size: 1.1em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card h3::before {
+            content: "📹";
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000;
+        }
+
+        .video-container img {
+            width: 100%;
+            display: block;
+            aspect-ratio: 16/9;
+            object-fit: cover;
+        }
+
+        .fps-overlay {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            text-align: right;
+            backdrop-filter: blur(4px);
+        }
+
+        .fps-overlay .topic-name {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.85em;
+            margin-bottom: 2px;
+        }
+
+        .fps-overlay .fps-value {
+            color: rgba(255, 255, 255, 0.95);
+            font-size: 1em;
+            font-weight: 600;
+        }
+
+        .stats {
+            margin-top: 40px;
+            text-align: center;
+            background: rgba(22, 33, 62, 0.5);
+            border-radius: 16px;
+            padding: 20px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .stats h2 {
+            color: #00d4ff;
+            margin-top: 0;
+        }
+
+        #stats-json {
+            background: #0d1117;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: left;
+            font-family: 'Consolas', monospace;
+            font-size: 0.9em;
+            color: #7ee787;
+            overflow-x: auto;
+        }
+
+        .no-streams {
+            text-align: center;
+            color: #888;
+            padding: 40px;
+            font-size: 1.2em;
+        }
+
+        .header-info {
+            text-align: center;
+            color: #888;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🎬 EdgeFlow Dashboard</h1>
+    <p class="header-info">Real-time video streams and performance metrics</p>
+
+    <div class="grid" id="video-grid">
+        <p class="no-streams">⏳ Waiting for video streams...</p>
+    </div>
+
+    <div class="stats">
+        <h2>📊 Live Stats</h2>
+        <pre id="stats-json">Loading...</pre>
+    </div>
+
+    <script>
+        let knownTopics = new Set();
+
+        async function updateStats() {
+            try {
+                const res = await fetch('/api/fps');
+                const data = await res.json();
+                document.getElementById('stats-json').textContent = JSON.stringify(data, null, 2);
+
+                for (const [topic, fps] of Object.entries(data)) {
+                    const el = document.getElementById('fps-' + topic);
+                    if (el) el.textContent = fps.toFixed(1) + ' FPS';
+
+                    if (!knownTopics.has(topic)) {
+                        knownTopics.add(topic);
+                        addVideoCard(topic);
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to fetch FPS:', e);
+            }
+        }
+
+        function addVideoCard(topic) {
+            const grid = document.getElementById('video-grid');
+
+            const noStreams = grid.querySelector('.no-streams');
+            if (noStreams) noStreams.remove();
+
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `
+                <div class="video-container">
+                    <img src="/video/${topic}" alt="${topic}" />
+                    <div class="fps-overlay">
+                        <div class="topic-name">${topic}</div>
+                        <div class="fps-value" id="fps-${topic}">-- FPS</div>
+                    </div>
+                </div>
+            `;
+            grid.appendChild(card);
+        }
+
+        setInterval(updateStats, 1000);
+        updateStats();
+    </script>
+</body>
+
+</html>
