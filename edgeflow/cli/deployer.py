@@ -141,7 +141,8 @@ def deploy_to_k8s(app, image_tag, namespace="default"):
             
             svc_yaml = svc_template.render(
                 name=name,
-                port=8000,  # 프레임워크 내부 고정값
+                port=8000,  # 프레임워크 웹 인터페이스 (HTTP)
+                tcp_port=8080, # [신규] 내부 통신용 TCP 포트 추가
                 node_port=gateway_node_port
             )
             svc_manifest = yaml.safe_load(svc_yaml)

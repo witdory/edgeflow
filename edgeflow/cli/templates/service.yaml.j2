@@ -9,9 +9,16 @@ spec:
   selector:
     app: {{ name }}
   ports:
-    - protocol: TCP
+    - name: http
+      protocol: TCP
       port: {{ port }}
       targetPort: {{ port }}
       {% if node_port %}
       nodePort: {{ node_port }}
       {% endif %}
+    {% if tcp_port %}
+    - name: tcp
+      protocol: TCP
+      port: {{ tcp_port }}
+      targetPort: {{ tcp_port }}
+    {% endif %}
