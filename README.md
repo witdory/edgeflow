@@ -52,7 +52,7 @@ python main.py --node gateway
 EdgeFlow abstracts distributed systems into simple Python classes. You implement data processing logic, and the framework handles communication, serialization, and deployment.
 
 ### 1. Application & Decorator (`EdgeApp`)
-The entry point of your system. You defines nodes using the `@app.node` decorator.
+The entry point of your system. You define nodes using the `@app.node` decorator.
 
 ```python
 from edgeflow import EdgeApp, RedisBroker
