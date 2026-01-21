@@ -21,4 +21,4 @@ dependencies = [
 edgeflow = "edgeflow.__main__:main"
 
 [tool.setuptools.package-data]
-edgeflow = ["templates/*.j2", "cli/templates/*.j2"]
+edgeflow = ["cli/templates/*.j2", "nodes/gateway/interfaces/templates/*.html"]
