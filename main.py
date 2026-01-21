@@ -61,7 +61,7 @@ class GpuProcessor(ConsumerNode):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
         cv2.putText(processed_img, f"Processed by: {self.hostname}", (10, 450), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-        
+        time.sleep(0.2)
         return processed_img
 
 
