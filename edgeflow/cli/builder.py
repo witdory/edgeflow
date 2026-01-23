@@ -17,11 +17,12 @@ def generate_dockerfile(node_path: str, build_config: Dict[str, Any]) -> str:
     base_image = build_config.get("base", "python:3.10-slim")
     dependencies = build_config.get("dependencies", [])
     
-    # Build pip install command
+    # Build uv pip install command
     pip_deps = " ".join(dependencies) if dependencies else ""
-    pip_install = f"RUN pip install --no-cache-dir {pip_deps}" if pip_deps else ""
+    uv_install = f"RUN uv pip install --system {pip_deps}" if pip_deps else ""
     
     dockerfile = f"""FROM {base_image}
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 WORKDIR /app
 
@@ -33,15 +34,15 @@ RUN apt-get update && apt-get install -y \\
 # Install edgeflow framework
 COPY edgeflow/ /app/edgeflow/
 COPY pyproject.toml setup.py /app/
-RUN pip install --no-cache-dir -e .
+RUN uv pip install --system -e .
 
 # Copy ONLY this specific node folder (lightweight image)
 COPY {node_path}/ /app/{node_path}/
 
 # Install node-specific dependencies
-{pip_install}
+{uv_install}
 
-# Default command (will be overridden by K8s)
+# Default command
 CMD ["python", "-c", "print('Node ready')"]
 """
     return dockerfile

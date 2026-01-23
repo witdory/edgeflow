@@ -19,8 +19,7 @@ gw  = sys.node("nodes/gateway", node_port=30080)
 # ============================================================
 # 연결 (Link Wiring)
 # ============================================================
-sys.link(cam).to(gpu)      # Camera -> GPU 처리
-sys.link(gpu).to(gw)       # GPU 결과 -> Gateway
+sys.link(cam).to(gpu).to(gw)       # GPU 결과 -> Gateway
 sys.link(cam).to(gw)       # Raw 영상도 Gateway로 직접 전송
 
 # ============================================================

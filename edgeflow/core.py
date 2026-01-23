@@ -69,8 +69,8 @@ class System:
         module = importlib.import_module(module_path)
         
         # Find EdgeNode subclass DEFINED in this module (not imported)
-        from .nodes import EdgeNode, ProducerNode, ConsumerNode, GatewayNode, FusionNode, BridgeNode
-        base_classes = {EdgeNode, ProducerNode, ConsumerNode, GatewayNode, FusionNode, BridgeNode}
+        from .nodes import EdgeNode, ProducerNode, ConsumerNode, GatewayNode, FusionNode
+        base_classes = {EdgeNode, ProducerNode, ConsumerNode, GatewayNode, FusionNode}
         
         for name, obj in vars(module).items():
             if isinstance(obj, type) and issubclass(obj, EdgeNode):
