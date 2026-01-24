@@ -10,7 +10,7 @@ from ....comms import Frame
 from ....utils.buffer import TimeJitterBuffer
 
 class WebInterface(BaseInterface):
-    def __init__(self, port=8000, buffer_delay=0.2):
+    def __init__(self, port=8000, buffer_delay=0.0):
         self.port = port
         self.app = FastAPI(title="EdgeFlow Viewer")
         self.latest_frame = None
@@ -33,6 +33,11 @@ class WebInterface(BaseInterface):
         self.app.add_api_route("/api/fps", self.get_fps, methods=["GET"])  # [신규]
         self.app.add_api_route("/dashboard", self.dashboard, methods=["GET"])  # [신규]
 
+        @self.app.get("/")
+        async def root():
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url="/dashboard")
+
         @self.app.get("/video")
         async def video_feed_default():
             return StreamingResponse(self.stream_generator("default"), media_type="multipart/x-mixed-replace; boundary=frameboundary")
@@ -50,8 +55,12 @@ class WebInterface(BaseInterface):
                 endpoint=r["endpoint"], 
                 methods=r["methods"]
             )
-            print(f"  + Custom Route Added: {r['path']}")
-        print(f"🌍 WebInterface prepared on port {self.port}")
+            print(f"  + Custom Route Added: {r['path']}", flush=True)
+
+        print(f"🌍 WebInterface prepared on port {self.port}", flush=True)
+        print("📋 Active Routes:", flush=True)
+        for route in self.app.routes:
+            print(f"  - [{route.methods}] {route.path}", flush=True)
 
     async def on_frame(self, frame):
         # Gateway가 이 함수를 호출해서 데이터를 넣어줌
@@ -111,14 +120,22 @@ class WebInterface(BaseInterface):
 
     # [신규] Dashboard HTML 페이지
     async def dashboard(self):
-        # 템플릿 파일 로드
-        import os
-        template_path = os.path.join(os.path.dirname(__file__), 'templates', 'dashboard.html')
-        with open(template_path, 'r', encoding='utf-8') as f:
-            html = f.read()
-        return HTMLResponse(content=html)
+        try:
+            # 템플릿 파일 로드
+            import os
+            template_path = os.path.join(os.path.dirname(__file__), 'templates', 'dashboard.html')
+            if not os.path.exists(template_path):
+                return HTMLResponse(content=f"<h1>Error: Template not found at {template_path}</h1>", status_code=500)
+                
+            with open(template_path, 'r', encoding='utf-8') as f:
+                html = f.read()
+            return HTMLResponse(content=html)
+        except Exception as e:
+            return HTMLResponse(content=f"<h1>Internal Error: {str(e)}</h1>", status_code=500)
 
     async def run_loop(self):
-        config = uvicorn.Config(self.app, host="0.0.0.0", port=self.port, log_level="error")
+        # Debug: Check routes before starting
+        print(f"🚀 Uvicorn starting with {len(self.app.routes)} routes")
+        config = uvicorn.Config(self.app, host="0.0.0.0", port=self.port, log_level="info")
         server = uvicorn.Server(config)
         await server.serve()

@@ -17,6 +17,7 @@ from ...config import settings
 class GatewayNode(EdgeNode):
     """외부로 데이터를 스트리밍하는 엔드포인트 노드"""
     node_type = "gateway"
+    input_protocol = "tcp"  # [Fix] Class Attribute로 이동 (Wiring 감지용)
     
     def __init__(self, broker=None, **kwargs):
         super().__init__(broker, **kwargs)
@@ -24,7 +25,6 @@ class GatewayNode(EdgeNode):
         self.interfaces = []
         self.server = None
         self.active_clients = set()
-        self.input_protocol = "tcp"
 
     def add_interface(self, interface):
         """인터페이스 플러그인 등록"""

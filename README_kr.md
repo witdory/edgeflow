@@ -46,7 +46,7 @@ uv pip install -r requirements.txt  # 또는 pip install ...
 # 실행
 python main.py
 ```
-**대시보드 접속:** http://localhost:8000/video/camera
+**대시보드 접속:** http://localhost:30080/video/camera
 
 ---
 

@@ -47,7 +47,7 @@ uv pip install -r requirements.txt  # or pip install -r requirements.txt
 # Run
 python main.py
 ```
-**Access Dashboard:** http://localhost:8000/video/camera
+**Access Dashboard:** http://localhost:30080/video/camera
 
 ---
 

@@ -17,6 +17,7 @@ class RedisBroker(BrokerInterface):
     
     def _connect(self):
         """Redis 연결 재시도 로직"""
+        wait_time = 1
         while True:
             try:
                 r = redis.Redis(host=self.host, port=self.port, socket_timeout=5)
@@ -24,8 +25,9 @@ class RedisBroker(BrokerInterface):
                 print(f"✅ Redis Connected: {self.host}:{self.port}")
                 return r
             except redis.ConnectionError:
-                print(f"⚠️ Redis Connection Failed ({self.host}). Retrying in 3s...")
-                time.sleep(3)
+                print(f"⚠️ Redis Connection Failed ({self.host}). Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+                wait_time = min(wait_time * 2, 30) # Max 30s wait
 
     def push(self, topic: str, data: bytes):
         """데이터 큐에 넣기 (Producer)"""
@@ -54,3 +56,18 @@ class RedisBroker(BrokerInterface):
         except Exception as e:
             print(f"Redis Pop Error: {e}")
             return None
+
+    # ========== Serialization Protocol ==========
+    
+    def to_config(self) -> dict:
+        """멀티프로세싱용 설정 딕셔너리 반환"""
+        return {
+            "__class_path__": f"{self.__class__.__module__}.{self.__class__.__name__}",
+            "host": self.host,
+            "port": self.port
+        }
+    
+    @classmethod
+    def from_config(cls, config: dict) -> 'RedisBroker':
+        """설정으로부터 인스턴스 생성"""
+        return cls(host=config.get("host"), port=config.get("port"))

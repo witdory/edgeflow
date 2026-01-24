@@ -12,7 +12,7 @@ sys = System("my-robot", broker=RedisBroker())
 # ============================================================
 # 노드 등록 (폴더 경로로 참조 - lazy loading)
 # ============================================================
-cam = sys.node("nodes/camera", device="camera", fps=30, queue_size=1)
+cam = sys.node("nodes/camera", device="camera", fps=30, queue_size=1) #NodeSpec만 생성
 gpu = sys.node("nodes/yolo", device="gpu", replicas=2)
 gw  = sys.node("nodes/gateway", node_port=30080)
 

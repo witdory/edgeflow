@@ -69,3 +69,25 @@ class DualRedisBroker(BrokerInterface):
 
     def trim(self, topic, size):
         self.ctrl_redis.ltrim(topic, 0, size)
+
+    # ========== Serialization Protocol ==========
+    
+    def to_config(self) -> dict:
+        """멀티프로세싱용 설정 딕셔너리 반환"""
+        return {
+            "__class_path__": f"{self.__class__.__module__}.{self.__class__.__name__}",
+            "ctrl_host": self.ctrl_redis.connection_pool.connection_kwargs.get('host'),
+            "ctrl_port": self.ctrl_redis.connection_pool.connection_kwargs.get('port'),
+            "data_host": self.data_redis.connection_pool.connection_kwargs.get('host'),
+            "data_port": self.data_redis.connection_pool.connection_kwargs.get('port')
+        }
+    
+    @classmethod
+    def from_config(cls, config: dict) -> 'DualRedisBroker':
+        """설정으로부터 인스턴스 생성"""
+        return cls(
+            ctrl_host=config.get("ctrl_host"),
+            ctrl_port=config.get("ctrl_port"),
+            data_host=config.get("data_host"),
+            data_port=config.get("data_port")
+        )

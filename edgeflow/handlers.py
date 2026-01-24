@@ -26,10 +26,15 @@ class TcpHandler:
     def connect(self):
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.settimeout(0.5)  # Fast fail if Gateway not ready
             self.sock.connect((self.host, self.port))
+            self.sock.settimeout(None) # Blocking mode for sending
             self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        except Exception as e:
-            # print(f"⚠️ TCP Connect Failed: {e}")
+        except (socket.timeout, ConnectionRefusedError, OSError):
+            # print(f"⚠️ TCP Connect Failed: {e}") 
+            # Quietly fail to allow retry in next frame
+            if self.sock:
+                self.sock.close()
             self.sock = None
 
     def send(self, frame):
