@@ -21,6 +21,16 @@ class BrokerInterface(ABC):
     def trim(self, topic: str, size: int):
         """스트림의 크기를 관리합니다."""
         pass
+
+    @abstractmethod
+    def queue_size(self, topic: str) -> int:
+        """현재 토픽 대기열의 크기를 반환합니다."""
+        pass
+
+    @abstractmethod
+    def get_queue_stats(self) -> Dict[str, Dict[str, int]]:
+        """모든 대기열의 상태(current, max)를 반환합니다."""
+        pass
     
     # ========== Serialization Protocol (Multiprocessing Support) ==========
     

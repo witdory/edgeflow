@@ -11,5 +11,5 @@ class VideoGateway(GatewayNode):
     
     def setup(self):
         """한 번만 실행: 인터페이스 등록"""
-        web = WebInterface(port=settings.GATEWAY_HTTP_PORT, buffer_delay=0.0)
+        web = WebInterface(port=settings.GATEWAY_HTTP_PORT, buffer_delay=0.5)
         self.add_interface(web)

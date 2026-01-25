@@ -120,7 +120,7 @@
 
         .stats-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(3, 1fr);
             gap: 20px;
             margin-top: 20px;
         }
@@ -255,6 +255,10 @@
                 <h3>Status Info</h3>
                 <pre id="status-json">Loading...</pre>
             </div>
+            <div class="stats-section">
+                <h3>System Resources</h3>
+                <div id="resource-stats">Loading...</div>
+            </div>
         </div>
     </div>
 
@@ -271,40 +275,136 @@
     </div>
 
     <script>
+        // Initialize WebSocket
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws/stats`;
+
+        let ws = null;
         let knownTopics = new Set();
 
-        async function updateStats() {
-            try {
-                // Fetch FPS
-                const fpsRes = await fetch('/api/fps');
-                const fpsData = await fpsRes.json();
-                document.getElementById('fps-json').textContent = JSON.stringify(fpsData, null, 2);
+        function connectWs() {
+            ws = new WebSocket(wsUrl);
 
-                // Fetch Status
-                const statusRes = await fetch('/api/status');
-                const statusData = await statusRes.json();
-                document.getElementById('status-json').textContent = JSON.stringify(statusData, null, 2);
+            ws.onopen = () => {
+                console.log('✅ WebSocket Connected');
+                document.querySelector('.header-info').style.color = '#2ec4b6';
+            };
 
-                // Update FPS displays
-                for (const [topic, fps] of Object.entries(fpsData)) {
-                    const el = document.getElementById('fps-' + topic);
-                    if (el) el.textContent = fps.toFixed(1) + ' FPS';
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    updateDashboard(data);
+                } catch (e) {
+                    console.error('WS Parse Error:', e);
+                }
+            };
 
-                    // Add new cards for new topics
+            ws.onclose = () => {
+                console.log('❌ WebSocket Disconnected. Reconnecting...');
+                document.querySelector('.header-info').style.color = '#ff6b6b';
+                setTimeout(connectWs, 2000);
+            };
+        }
+
+        function updateDashboard(data) {
+            if (!data) return;
+
+            // 1. Update FPS
+            document.getElementById('fps-json').textContent = JSON.stringify(data.fps, null, 2);
+            for (const [topic, fps] of Object.entries(data.fps)) {
+                const el = document.getElementById('fps-' + topic);
+                if (el) el.textContent = fps.toFixed(1) + ' FPS';
+
+                if (!knownTopics.has(topic)) {
+                    knownTopics.add(topic);
+                    addVideoCard(topic);
+                }
+            }
+
+            // [Fix] Discover topics from resources
+            if (data.buffers) {
+                for (const topic of Object.keys(data.buffers)) {
                     if (!knownTopics.has(topic)) {
                         knownTopics.add(topic);
                         addVideoCard(topic);
                     }
                 }
-            } catch (e) {
-                console.error('Failed to fetch stats:', e);
             }
+
+            // 2. Update Status
+            document.getElementById('status-json').textContent = JSON.stringify(data.status, null, 2);
+
+            // 3. Update Resources (Queues & Buffers)
+            updateResourceBars(data);
+        }
+
+        function updateResourceBars(data) {
+            const container = document.getElementById('resource-stats');
+            container.innerHTML = '';
+
+            // Queues
+            if (data.queues && Object.keys(data.queues).length > 0) {
+                const qHeader = document.createElement('h4');
+                qHeader.textContent = "Redis Queues (Backpressure)";
+                qHeader.style.margin = "10px 0 5px 0";
+                qHeader.style.color = "#ff9f1c";
+                container.appendChild(qHeader);
+
+                for (const [topic, stats] of Object.entries(data.queues)) {
+                    addBar(container, topic, stats.current, stats.max, "#ff9f1c");
+                }
+            } else {
+                // If empty or loading
+            }
+
+            // Buffers
+            if (data.buffers) {
+                const bHeader = document.createElement('h4');
+                bHeader.textContent = "Web Buffers (Jitter)";
+                bHeader.style.margin = "15px 0 5px 0";
+                bHeader.style.color = "#2ec4b6";
+                container.appendChild(bHeader);
+
+                for (const [topic, stats] of Object.entries(data.buffers)) {
+                    addBar(container, topic, stats.current, stats.max, "#2ec4b6");
+                }
+            }
+        }
+
+        function addBar(container, label, value, max, color) {
+            const percent = (max > 0) ? Math.min((value / max) * 100, 100) : 0;
+
+            const wrapper = document.createElement('div');
+            wrapper.style.marginBottom = "8px";
+
+            const info = document.createElement('div');
+            info.style.display = "flex";
+            info.style.justifyContent = "space-between";
+            info.style.fontSize = "0.85em";
+            info.style.marginBottom = "2px";
+            info.innerHTML = `<span>${label}</span><span>${value} / ${max}</span>`;
+
+            const barBg = document.createElement('div');
+            barBg.style.background = "rgba(255,255,255,0.1)";
+            barBg.style.borderRadius = "4px";
+            barBg.style.height = "8px";
+            barBg.style.overflow = "hidden";
+
+            const barFill = document.createElement('div');
+            barFill.style.background = color;
+            barFill.style.width = `${percent}%`;
+            barFill.style.height = "100%";
+            barFill.style.transition = "width 0.3s";
+
+            barBg.appendChild(barFill);
+            wrapper.appendChild(info);
+            wrapper.appendChild(barBg);
+            container.appendChild(wrapper);
         }
 
         function addVideoCard(topic) {
             const grid = document.getElementById('video-grid');
 
-            // Remove "waiting" message if present
             const noStreams = grid.querySelector('.no-streams');
             if (noStreams) noStreams.remove();
 
@@ -332,7 +432,6 @@
             modalVideo.src = `/video/${topic}`;
             modalTopic.textContent = topic;
 
-            // Update FPS in modal from current data
             const fpsEl = document.getElementById('fps-' + topic);
             if (fpsEl) modalFps.textContent = fpsEl.textContent;
 
@@ -344,19 +443,16 @@
             modal.classList.remove('active');
         }
 
-        // Close on ESC key
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') closeModal();
         });
 
-        // Close on background click
         document.getElementById('video-modal').addEventListener('click', (e) => {
             if (e.target.id === 'video-modal') closeModal();
         });
 
-        // Initial load and periodic updates
-        setInterval(updateStats, 1000);
-        updateStats();
+        // Start connection
+        connectWs();
     </script>
 </body>
 

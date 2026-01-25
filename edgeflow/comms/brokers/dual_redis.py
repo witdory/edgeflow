@@ -2,6 +2,7 @@
 import redis.exceptions
 import struct
 import time
+from typing import Dict
 from .base import BrokerInterface # 기본 추상 클래스
 
 from ...config import settings
@@ -54,24 +55,22 @@ class DualRedisBroker(BrokerInterface):
             return
 
         # [수정] Pickle 대신 Frame 헤더(struct)에서 직접 ID 추출
-        # Frame.to_bytes()의 첫 4바이트는 frame_id (unsigned int, big-endian)
         frame_id = struct.unpack('!I', frame_bytes[:4])[0]
         
-        # 1. [Data Plane] 무거운 데이터 저장 (Key-Value)
-        # Expiry(만료 시간) 5초를 줘서 나중에 자동 삭제되게 함 (메모리 관리)
+        # 1. [Data Plane] 무거운 데이터 저장
         data_key = f"{topic}:data:{frame_id}"
         self.data_redis.set(data_key, frame_bytes, ex=5)
         
-        # 2. [Control Plane] 가벼운 ID 줄 세우기 (Queue)
+        # 2. [Control Plane] 가벼운 ID 줄 세우기
         self.ctrl_redis.lpush(topic, str(frame_id))
-        # 큐 길이 제한 (Trim) - 제어용 Redis에서 수행
-        self.ctrl_redis.ltrim(topic, 0, 50)
+        
+        # [삭제] 여기서 ltrim 하지 않음 (Producer Handler가 trim 호출함)
+        # self.ctrl_redis.ltrim(topic, 0, 50)
 
     def pop(self, topic, timeout=0.1):
         """
         Ctrl Redis에서 ID를 꺼내고, Data Redis에서 실제 데이터를 가져옴
         """
-        # 1. [Control Plane] ID 꺼내기 (Blocking Pop)
         item = self.ctrl_redis.brpop(topic, timeout=timeout)
         if not item:
             return None
@@ -79,21 +78,46 @@ class DualRedisBroker(BrokerInterface):
         _, frame_id_bytes = item
         frame_id = frame_id_bytes.decode('utf-8')
         
-        # 2. [Data Plane] 실제 데이터 조회
         data_key = f"{topic}:data:{frame_id}"
         raw_data = self.data_redis.get(data_key)
         
         if raw_data:
-            # (옵션) 읽었으면 삭제해서 메모리 아끼기? 
-            # 여러 Consumer가 읽어야 하면 삭제 금지 (TTL로 자동삭제 추천)
-            # self.data_redis.delete(data_key) 
             return raw_data
         else:
             print(f"⚠️ Data missing in Redis #2 for ID: {frame_id}")
             return None
 
     def trim(self, topic, size):
-        self.ctrl_redis.ltrim(topic, 0, size)
+        self.ctrl_redis.ltrim(topic, 0, size - 1)  # [Fix] inclusive index, so -1
+        # [신규] Limit 정보 저장
+        self.ctrl_redis.set(f"edgeflow:meta:limit:{topic}", size)
+
+    def queue_size(self, topic: str) -> int:
+        """대기열 크기 반환 (Control Redis 기준)"""
+        try:
+            return self.ctrl_redis.llen(topic)
+        except Exception:
+            return 0
+
+    def get_queue_stats(self) -> Dict[str, Dict[str, int]]:
+        """모든 큐 상태 반환"""
+        stats = {}
+        try:
+            # Limit 메타데이터가 있는 토픽 기반으로 조회
+            meta_keys = self.ctrl_redis.keys("edgeflow:meta:limit:*")
+            
+            for key in meta_keys:
+                key_str = key.decode('utf-8')
+                topic = key_str.replace("edgeflow:meta:limit:", "")
+                
+                limit_bytes = self.ctrl_redis.get(key)
+                limit = int(limit_bytes) if limit_bytes else 0
+                current = self.ctrl_redis.llen(topic)
+                
+                stats[topic] = {"current": current, "max": limit}
+        except Exception as e:
+            print(f"DualRedis Stats Error: {e}")
+        return stats
 
     # ========== Serialization Protocol ==========
     

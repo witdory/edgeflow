@@ -28,6 +28,8 @@ class GatewayNode(EdgeNode):
 
     def add_interface(self, interface):
         """인터페이스 플러그인 등록"""
+        if hasattr(interface, 'set_broker'):
+            interface.set_broker(self.broker)
         self.interfaces.append(interface)
 
     def setup(self):

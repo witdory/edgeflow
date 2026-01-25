@@ -2,6 +2,7 @@
 import redis
 import time
 import os
+from typing import Dict
 from .base import BrokerInterface
 
 class RedisBroker(BrokerInterface):
@@ -42,9 +43,42 @@ class RedisBroker(BrokerInterface):
         """오래된 데이터 삭제 (메모리 관리)"""
         self._ensure_connected()
         try:
-            self._redis.ltrim(topic, -size, -1)
+            self._redis.ltrim(topic, -size, -1) # Redis List Trim (Right is new)
+            # [신규] Limit 정보 저장 (모니터링용)
+            self._redis.set(f"edgeflow:meta:limit:{topic}", size)
         except Exception:
             pass
+
+    def queue_size(self, topic: str) -> int:
+        """대기열 크기 반환"""
+        self._ensure_connected()
+        try:
+            return self._redis.llen(topic)
+        except Exception:
+            return 0
+
+    def get_queue_stats(self) -> Dict[str, Dict[str, int]]:
+        """모든 큐 상태 반환"""
+        self._ensure_connected()
+        stats = {}
+        try:
+            # 1. 모든 키 스캔 (최적화 필요하지만 일단 keys)
+            # 실제 큐 이름 패턴이 명확하지 않으므로, known topics를 관리하거나 규칙 필요
+            # 여기서는 간단히 limit 메타데이터가 있는 토픽만 조회하는 전략 사용
+            meta_keys = self._redis.keys("edgeflow:meta:limit:*")
+            
+            for key in meta_keys:
+                key_str = key.decode('utf-8')
+                topic = key_str.replace("edgeflow:meta:limit:", "")
+                
+                limit_bytes = self._redis.get(key)
+                limit = int(limit_bytes) if limit_bytes else 0
+                current = self._redis.llen(topic)
+                
+                stats[topic] = {"current": current, "max": limit}
+        except Exception as e:
+            print(f"Redis Stats Error: {e}")
+        return stats
 
     def pop(self, topic: str, timeout: int=0):
         """데이터 가져오기 (Consumer) - Blocking"""
