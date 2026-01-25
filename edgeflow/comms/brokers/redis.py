@@ -18,6 +18,7 @@ class RedisBroker(BrokerInterface):
         self.maxlen = maxlen  # Stream max length (approximate)
         self._redis = None
         self._consumer_groups = set()  # Track created groups
+        self._topic_last_id = {}  # Track last seen ID per topic
 
     def _ensure_connected(self):
         if self._redis is None:
@@ -142,14 +143,6 @@ class RedisBroker(BrokerInterface):
             print(f"Redis Stats Error: {e}")
         return stats
 
-    
-    def __init__(self, host=None, port=None, maxlen=100):
-        self.host = host or os.getenv('REDIS_HOST', 'localhost')
-        self.port = port or int(os.getenv('REDIS_PORT', 6379))
-        self.maxlen = maxlen
-        self._redis = None
-        self._consumer_groups = set()
-        self._topic_last_id = {}  # Track last seen ID per topic
 
     def pop_latest(self, topic: str, timeout: int = 1) -> Optional[bytes]:
         """
