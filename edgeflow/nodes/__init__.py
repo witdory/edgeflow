@@ -8,6 +8,7 @@ from .base import EdgeNode
 from .producer import ProducerNode
 from .consumer import ConsumerNode
 from .fusion import FusionNode
+from .sink import SinkNode
 from .gateway.core import GatewayNode
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "ProducerNode", 
     "ConsumerNode", 
     "GatewayNode", 
-    "FusionNode"
+    "FusionNode",
+    "SinkNode"
 ]

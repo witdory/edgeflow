@@ -5,22 +5,11 @@ import time
 import threading
 import importlib
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from .handlers import RedisHandler, TcpHandler
 from .config import settings
-
-
-@dataclass
-class NodeSpec:
-    """Metadata holder for lazy node loading (Blueprint Pattern)"""
-    path: str                          # e.g., "nodes/camera"
-    config: Dict[str, Any] = field(default_factory=dict)  # replicas, device, fps 등
-    name: str = ""                     # Auto-generated from path if not provided
-    
-    def __post_init__(self):
-        if not self.name:
-            # nodes/camera -> camera, nodes/yolo -> yolo
-            self.name = self.path.replace("/", "_").replace("nodes_", "")
+from .registry import NodeSpec, NodeRegistry
+from .qos import QoS
 
 
 class Linker:
@@ -28,12 +17,14 @@ class Linker:
         self.system = system
         self.source = source
 
-    def to(self, target: NodeSpec, channel: str = None) -> 'Linker':
-        """Register a connection between nodes (lazy, metadata only)"""
+    def to(self, target: NodeSpec, channel: str = None, qos: QoS = QoS.REALTIME) -> 'Linker':
+        """Register a connection between nodes with QoS policy"""
         self.system._links.append({
             'source': self.source,
             'target': target,
-            'channel': channel
+            'channel': channel,
+            'qos': qos,  # [신규] 연결별 QoS 정책
+            'broker': self.system.broker
         })
         return Linker(self.system, target)
 
@@ -43,7 +34,7 @@ class System:
     Infrastructure Definition (Blueprint Pattern)
     - Lazy loading: node() does NOT import classes
     - Wiring: link() stores metadata only
-    - Execution: run() loads classes and executesk
+    - Execution: run() loads classes and executes
     """
     def __init__(self, name: str, broker):
         self.name = name
@@ -53,8 +44,13 @@ class System:
         self._instances = {}  # Populated at run()
 
     def node(self, path: str, **kwargs) -> NodeSpec:
-        """Register node by path (lazy loading, no import)"""
-        spec = NodeSpec(path=path, config=kwargs)
+        """Register node by path (uses global registry for sharing)"""
+        spec = NodeRegistry.get_or_create(path, **kwargs)
+        self.specs[spec.name] = spec
+        return spec
+
+    def share(self, spec: NodeSpec) -> NodeSpec:
+        """Import a node from another System (add to my scope)"""
         self.specs[spec.name] = spec
         return spec
 
@@ -110,12 +106,12 @@ class System:
 
             # Redis connection
             else:
-                topic = f"{source.name}_to_{target.name}"
-                target.input_topics.append(topic)
+                topic = source.name  # [수정] 토픽 = source 이름만
+                target.input_topics.append({'topic': source.name, 'qos': link.get('qos', QoS.REALTIME)})
                 limit = getattr(source, 'queue_size', 1)
                 handler = RedisHandler(self.broker, topic, queue_size=limit)
                 source.output_handlers.append(handler)
-                print(f"🔗 [Queue] {source.name} --(Redis)--> {target.name} (Topic: {topic})")
+                print(f"🔗 [Stream] {source.name} --(QoS:{link.get('qos', QoS.REALTIME).name})--> {target.name}")
 
     def run(self):
         """
@@ -155,6 +151,11 @@ class System:
         # [Mode 2: Local Simulation (Multiprocessing)] python main.py
         else:
             print(f"▶️ [Local] Launching ALL nodes ({len(self.specs)}) in separate processes")
+            
+            # [Reset Broker State]
+            if hasattr(self.broker, 'reset'):
+                self.broker.reset()
+                
             import multiprocessing
             
             processes = []
@@ -168,8 +169,7 @@ class System:
                 
                 p = multiprocessing.Process(
                     target=self._run_node_process,
-                    args=(name, spec.path, spec.config, broker_config, wiring_config),
-                    daemon=True
+                    args=(name, spec.path, spec.config, broker_config, wiring_config)
                 )
                 p.start()
                 processes.append(p)
@@ -209,12 +209,14 @@ class System:
                     'target': target_name,
                     'protocol': protocol,
                     'channel': channel,
-                    'queue_size': getattr(self._load_node_class(link['source'].path), 'queue_size', 1)
+                    'queue_size': getattr(self._load_node_class(link['source'].path), 'queue_size', 1),
+                    'qos': link.get('qos', QoS.REALTIME)  # [신규] QoS 전달
                 })
             
             if link['target'].name == node_name:
                 source_name = link['source'].name
-                inputs.append(f"{source_name}_to_{node_name}")
+                qos = link.get('qos', QoS.REALTIME)
+                inputs.append({'topic': source_name, 'qos': qos})  # [변경] 토픽=source, QoS 포함
                 
         return {'outputs': outputs, 'inputs': inputs}
 
@@ -226,12 +228,12 @@ class System:
 
     @staticmethod
     def _hydrate_node_handlers(node, broker, wiring):
-        """Hydrate node with handlers based on wiring config"""
-        # Inputs
-        # (ConsumerNode automatically subscribes based on input_topics list)
-        for topic in wiring['inputs']:
-            if topic not in node.input_topics:
-                node.input_topics.append(topic)
+        # Inputs (now includes QoS)
+        for inp in wiring['inputs']:
+            topic = inp['topic'] if isinstance(inp, dict) else inp
+            qos = inp.get('qos', QoS.REALTIME) if isinstance(inp, dict) else QoS.REALTIME
+            if topic not in [t['topic'] if isinstance(t, dict) else t for t in node.input_topics]:
+                node.input_topics.append({'topic': topic, 'qos': qos})
                 
         # Outputs
         for out in wiring['outputs']:
@@ -244,11 +246,11 @@ class System:
                 node.output_handlers.append(handler)
                 print(f"🔗 [Direct] {node.name} ==(TCP)==> {out['target']}")
             else:
-                # Redis connection
-                topic = f"{node.name}_to_{out['target']}"
+                # Redis connection - topic is now just source name
+                topic = node.name
                 handler = RedisHandler(broker, topic, queue_size=out['queue_size'])
                 node.output_handlers.append(handler)
-                print(f"🔗 [Queue] {node.name} --(Redis)--> {out['target']}")
+                print(f"🔗 [Stream] {node.name} --(QoS:{out.get('qos', 'REALTIME').name if hasattr(out.get('qos'), 'name') else 'REALTIME'})--> {out['target']}")
 
     @staticmethod
     def _run_node_process(name: str, path: str, node_config: Dict, broker_config: Dict, wiring_config: Dict):
@@ -273,8 +275,8 @@ class System:
         module = importlib.import_module(module_path)
         
         # Find class
-        from .nodes import EdgeNode, ProducerNode, ConsumerNode, GatewayNode, FusionNode
-        base_classes = {EdgeNode, ProducerNode, ConsumerNode, GatewayNode, FusionNode}
+        from .nodes import EdgeNode, ProducerNode, ConsumerNode, GatewayNode, FusionNode, SinkNode
+        base_classes = {EdgeNode, ProducerNode, ConsumerNode, GatewayNode, FusionNode, SinkNode}
         
         node_cls = None
         for obj_name, obj in vars(module).items():
@@ -300,3 +302,104 @@ class System:
 
 # Backward compatibility alias
 EdgeApp = System
+
+
+def run_all(*systems: System):
+    """
+    Run multiple Systems together (multi-broker support)
+    
+    - Merges all nodes from all Systems
+    - Deduplicates nodes (same path = same node)
+    - Each node gets handlers from ALL systems that reference it
+    """
+    import multiprocessing
+    
+    # 1. Collect all unique nodes
+    all_specs: Dict[str, NodeSpec] = {}
+    for s in systems:
+        for name, spec in s.specs.items():
+            all_specs[name] = spec
+    
+    # 2. Merge wiring from all systems
+    all_links = []
+    for s in systems:
+        all_links.extend(s._links)
+    
+    # 3. Build wiring config per node (from ALL systems)
+    def resolve_merged_wiring(node_name: str) -> Dict[str, Any]:
+        outputs = []
+        inputs = []
+        
+        for link in all_links:
+            if link['source'].name == node_name:
+                target_name = link['target'].name
+                channel = link.get('channel')
+                broker = link.get('broker')
+                
+                # Load target class to check protocol
+                target_spec = all_specs.get(target_name)
+                if not target_spec:
+                    continue
+                target_cls = systems[0]._load_node_class(target_spec.path)
+                protocol = getattr(target_cls, 'input_protocol', 'redis')
+                
+                # Get queue_size from source
+                source_spec = all_specs.get(node_name)
+                source_cls = systems[0]._load_node_class(source_spec.path)
+                queue_size = getattr(source_cls, 'queue_size', 1)
+                
+                outputs.append({
+                    'target': target_name,
+                    'protocol': protocol,
+                    'channel': channel,
+                    'queue_size': queue_size,
+                    'broker_config': broker.to_config() if broker else None
+                })
+            
+            if link['target'].name == node_name:
+                source_name = link['source'].name
+                qos = link.get('qos', QoS.REALTIME)
+                inputs.append({'topic': source_name, 'qos': qos})  # [수정] 토픽=source
+        
+        return {'outputs': outputs, 'inputs': inputs}
+    
+    # 4. Launch processes
+    processes = []
+    
+    # [Reset Broker State]
+    # Assuming all systems share the same physical broker for now,
+    # or separate brokers. We reset ALL brokers attached to systems.
+    # To avoid double reset if shared, we can track checked brokers, 
+    # but reset() is usually idempotent (FLUSHALL).
+    
+    # Simple strategy: Reset the broker of the first system (Master Broker)
+    # or iterate all unique brokers.
+    if processes == []:
+        # Only reset once at the beginning
+        if systems and hasattr(systems[0].broker, 'reset'):
+             systems[0].broker.reset()
+
+    default_broker_config = systems[0].broker.to_config()
+    
+    for name, spec in all_specs.items():
+        wiring_config = resolve_merged_wiring(name)
+        
+        p = multiprocessing.Process(
+            target=System._run_node_process,
+            args=(name, spec.path, spec.config, default_broker_config, wiring_config),
+            daemon=True
+        )
+        p.start()
+        processes.append(p)
+    
+    print(f"▶️ [Multi-System] Launched {len(processes)} nodes")
+    
+    try:
+        while True:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\n👋 System Shutdown - Stopping all processes...")
+        for p in processes:
+            p.terminate()
+        import sys as sys_module
+        sys_module.exit(0)

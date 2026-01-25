@@ -1,130 +1,102 @@
-# Edgeflow v0.2.0 Architecture
+# EdgeFlow Architecture
 
-GitHub 및 Mermaid를 지원하는 마크다운 뷰어에서 렌더링됩니다.
+## Overview
+EdgeFlow is a lightweight, distributed framework for Edge AI pipelines, designed for high-performance video processing on resource-constrained devices.
 
----
+## Core Concepts
 
-## 1. Class Hierarchy (Arduino Pattern)
-
-Edgeflow v0.2.0 uses an inheritance-based structure.
+### 1. Dual Control/Data Plane (DualRedisBroker)
+To solve the "Redis Lag" problem in high-throughput video streams, we separate metadata from payload.
 
 ```mermaid
-classDiagram
-    class EdgeNode {
-        +setup()
-        +loop()
-        +teardown()
-        +send_result(Frame)
-        #_run_loop()
-    }
+graph TD
+    subgraph Edge Device
+        PRODUCER[Producer Node\n(Camera)]
+    end
 
-    class ProducerNode {
-        +int fps
-        +loop() Frame
-        #_run_loop()
-    }
-    
-    class ConsumerNode {
-        +int replicas
-        +loop(data) Frame
-        #_run_loop()
-    }
-    
-    class GatewayNode {
-        +int tcp_port
-        +add_interface()
-        +setup()
-        #_run_async()
-    }
+    subgraph "Dual Broker"
+        CTRL[Control Redis :6379\n(Stream: IDs)]
+        DATA[Data Redis :6380\n(Blob: Images)]
+    end
 
-    EdgeNode <|-- ProducerNode
-    EdgeNode <|-- ConsumerNode
-    EdgeNode <|-- GatewayNode
+    subgraph Consumers
+        AI[AI Node\n(QoS: REALTIME)]
+        LOG[Logger Node\n(QoS: DURABLE)]
+    end
+
+    PRODUCER -- "1. Store Image (SET)" --> DATA
+    PRODUCER -- "2. Push ID (XADD)" --> CTRL
+    
+    CTRL -- "3. Notify ID" --> AI
+    CTRL -- "3. Notify ID" --> LOG
+    
+    AI -- "4. Fetch Image (GET)" --> DATA
+    LOG -- "4. Fetch Image (GET)" --> DATA
 ```
 
----
+### 2. QoS-based Consumption
+We support different consumption patterns from a **Single Stream** to handle both real-time requirements and data integrity.
 
-## 2. System Blueprint & Lazy Loading
+```mermaid
+sequenceDiagram
+    participant Camera
+    participant Stream
+    participant YOLO (REALTIME)
+    participant Logger (DURABLE)
 
-The `System` class uses the Blueprint pattern to manage `NodeSpec`s.
+    Camera->>Stream: Frame 1
+    Camera->>Stream: Frame 2
+    Camera->>Stream: Frame 3
+    
+    Note over YOLO (REALTIME): "Processing..."
+    
+    %% YOLO skips Frame 1 & 2 because it was busy
+    Stream->>YOLO: Frame 3 (Latest)
+    
+    %% Logger reads everything
+    Stream->>Logger: Frame 1
+    Stream->>Logger: Frame 2
+    Stream->>Logger: Frame 3
+```
+
+- **REALTIME (YOLO)**: Uses `pop_latest()`. Skips intermediate frames if processing is slow. Always guarantees lowest latency.
+- **DURABLE (Logger)**: Uses `pop()`. Reads every single frame sequentially using Consumer Groups. Guarantees zero data loss.
+
+## Component Hierarchy
 
 ```mermaid
 classDiagram
     class System {
-        +specs
-        +node(path) NodeSpec
-        +link(NodeSpec) Linker
+        +node(path)
+        +link(source).to(target, qos)
         +run()
     }
-
-    class NodeSpec {
-        +String path
-        +Dict config
-        +String name
-    }
-
+    
     class Linker {
-        +to(target)
+        +to(target, qos)
     }
 
-    System "1" *-- "many" NodeSpec : manages
-    System ..> Linker : creates
+    class QoS {
+        <<Enumeration>>
+        REALTIME
+        DURABLE
+    }
+
+    class DualRedisBroker {
+        +push(topic, data)
+        +pop(topic)
+        +pop_latest(topic)
+        +reset()
+    }
+
+    System --> Linker : Creates
+    Linker --> QoS : Uses
+    System --> DualRedisBroker : Manages
 ```
 
----
+## Lifecycle Management
+To ensure a clean environment for reproducible runs:
 
-## 3. Execution Flow (Local Simulation)
-
-Sequence of loading and executing nodes locally.
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant System
-    participant Loader
-    participant Node
-    participant Broker as Redis
-
-    User->>System: run()
-    
-    Note over System: 1. Instantiation Phase
-    System->>Loader: _load_node_class(path)
-    Loader-->>System: NodeClass
-    System->>Node: __init__()
-
-    Note over System: 2. Wiring Phase
-    System->>Node: Configure handlers
-
-    Note over System: 3. Execution Phase
-    System->>Node: execute() (Thread)
-    Node->>Node: setup()
-    
-    loop Every Frame
-        Node->>Node: loop()
-        Node->>Broker: Push Data
-    end
-```
-
----
-
-## 4. Deployment Flow (CLI)
-
-How `edgeflow deploy` works.
-
-```mermaid
-flowchart LR
-    subgraph Host [Developer PC]
-        Main[main.py] -->|Inspect| CLI[edgeflow deploy]
-        CLI -->|Read| Spec[NodeSpec]
-    end
-
-    subgraph Build [Build Process]
-        Spec -->|Generate| Builder[builder.py]
-        Builder -->|UV Install| Docker[Docker Image]
-    end
-
-    subgraph Cluster [Kubernetes]
-        Docker -->|Deploy| Pod1[Pod: Camera]
-        Docker -->|Deploy| Pod2[Pod: YOLO]
-    end
-```
+1. **System Start**: Main process calls `broker.reset()`.
+2. **Broker Reset**: Executes `FLUSHALL` on Redis (Control & Data).
+3. **Process Spawn**: Worker processes connect to Redis *without* flushing.

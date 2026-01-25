@@ -9,6 +9,7 @@ Arduino Pattern:
 import os
 from .base import EdgeNode
 from ..comms import Frame
+from ..qos import QoS
 
 
 class ConsumerNode(EdgeNode):
@@ -29,28 +30,46 @@ class ConsumerNode(EdgeNode):
         raise NotImplementedError("ConsumerNode requires loop(data) implementation")
 
     def _run_loop(self):
-        """[Internal] Redis에서 데이터를 받아 loop() 반복 호출"""
-        target_topic = self.input_topics[0] if self.input_topics else "default"
-        print(f"🧠 Consumer started (Replicas: {self.replicas}), Input Topic: {self.input_topics}")
+        """[Internal] Stream에서 QoS에 따라 데이터를 받아 loop() 반복 호출"""
+        # input_topics can be dict with 'topic' and 'qos' or just string
+        if not self.input_topics:
+            print(f"⚠️ No input topics for {self.name}")
+            return
+        
+        first_input = self.input_topics[0]
+        if isinstance(first_input, dict):
+            target_topic = first_input['topic']
+            qos = first_input.get('qos', QoS.REALTIME)
+        else:
+            target_topic = first_input
+            qos = QoS.REALTIME
+        
+        group_name = getattr(self, 'name', 'default')
+        consumer_id = self.hostname
+        
+        print(f"🧠 Consumer started (QoS: {qos.name}), Input: {target_topic}, Group: {group_name}")
 
         while self.running:
-            # Redis에서 데이터 가져오기
-            packet = self.broker.pop(target_topic, timeout=1)
+            # QoS에 따라 다른 읽기 전략
+            if qos == QoS.REALTIME:
+                # REALTIME: 최신만 읽기
+                packet = self.broker.pop_latest(target_topic, timeout=1)
+            else:
+                # DURABLE/BALANCED: 순차 읽기 (Consumer Group)
+                packet = self.broker.pop(target_topic, timeout=1, group=group_name, consumer=consumer_id)
+            
             if not packet:
                 continue
 
-            # 역직렬화
             frame = Frame.from_bytes(packet)
             if not frame:
                 continue
 
             try:
-                # 사용자 loop() 실행
                 result = self.loop(frame.data)
                 if result is None:
                     continue
 
-                # 결과 포장
                 out_img, out_meta = result if isinstance(result, tuple) else (result, {})
                 resp = Frame(frame.frame_id, frame.timestamp, out_meta, out_img)
                 self.send_result(resp)

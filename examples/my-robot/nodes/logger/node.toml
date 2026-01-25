@@ -1,0 +1,3 @@
+# Logger Node Configuration
+[node]
+type = "sink"

@@ -1,70 +1,132 @@
-#edgeflow/comms/broker.py
+#edgeflow/comms/brokers/redis.py
+"""
+Redis Stream-based Broker for fan-out and consumer group support
+"""
 import redis
 import time
 import os
-from typing import Dict
+from typing import Dict, Optional
 from .base import BrokerInterface
 
+
 class RedisBroker(BrokerInterface):
-    def __init__(self, host=None, port=None):
+    """Redis Stream-based message broker"""
+    
+    def __init__(self, host=None, port=None, maxlen=100):
         self.host = host or os.getenv('REDIS_HOST', 'localhost')
         self.port = port or int(os.getenv('REDIS_PORT', 6379))
-        self._redis = None  # Lazy: 아직 연결 안 함
+        self.maxlen = maxlen  # Stream max length (approximate)
+        self._redis = None
+        self._consumer_groups = set()  # Track created groups
 
     def _ensure_connected(self):
-        """첫 호출 시에만 연결, 이후엔 재사용"""
         if self._redis is None:
             self._redis = self._connect()
     
     def _connect(self):
-        """Redis 연결 재시도 로직"""
         wait_time = 1
         while True:
             try:
                 r = redis.Redis(host=self.host, port=self.port, socket_timeout=5)
-                r.ping() # 연결 테스트
+                r.ping()
                 print(f"✅ Redis Connected: {self.host}:{self.port}")
                 return r
             except redis.ConnectionError:
                 print(f"⚠️ Redis Connection Failed ({self.host}). Retrying in {wait_time}s...")
                 time.sleep(wait_time)
-                wait_time = min(wait_time * 2, 30) # Max 30s wait
+                wait_time = min(wait_time * 2, 30)
 
-    def push(self, topic: str, data: bytes):
-        """데이터 큐에 넣기 (Producer)"""
-        if not data: return
+    def _ensure_consumer_group(self, stream: str, group: str):
+        """Create consumer group if not exists"""
+        key = f"{stream}:{group}"
+        if key in self._consumer_groups:
+            return
+        
         self._ensure_connected()
         try:
-            self._redis.rpush(topic, data)
+            # Start from 0 to read all existing messages (important for late joiners)
+            self._redis.xgroup_create(stream, group, id='0', mkstream=True)
+            self._consumer_groups.add(key)
+        except redis.ResponseError as e:
+            if "BUSYGROUP" in str(e):
+                # Group already exists
+                self._consumer_groups.add(key)
+            else:
+                raise
+
+    def push(self, topic: str, data: bytes):
+        """Add message to stream (XADD with MAXLEN)"""
+        if not data:
+            return
+        self._ensure_connected()
+        try:
+            # XADD with approximate maxlen for auto-trimming
+            self._redis.xadd(topic, {'data': data}, maxlen=self.maxlen, approximate=True)
         except Exception as e:
             print(f"Redis Push Error: {e}")
 
-    def trim(self, topic: str, size: int =1):
-        """오래된 데이터 삭제 (메모리 관리)"""
+    def pop(self, topic: str, timeout: int = 1, group: str = "default", consumer: str = "worker"):
+        """
+        Read message from stream using consumer group (XREADGROUP)
+        - group: consumer group name (e.g., node name)
+        - consumer: consumer instance name (e.g., replica id)
+        """
+        self._ensure_connected()
+        self._ensure_consumer_group(topic, group)
+        
+        try:
+            # XREADGROUP: read new messages for this group
+            # '>' means only new messages not yet delivered
+            result = self._redis.xreadgroup(
+                groupname=group,
+                consumername=consumer,
+                streams={topic: '>'},
+                count=1,
+                block=timeout * 1000  # milliseconds
+            )
+            
+            if not result:
+                return None
+            
+            # result format: [(stream_name, [(msg_id, {field: value})])]
+            stream_name, messages = result[0]
+            if not messages:
+                return None
+            
+            msg_id, fields = messages[0]
+            data = fields.get(b'data')
+            
+            # Auto-acknowledge the message
+            self._redis.xack(topic, group, msg_id)
+            
+            return data
+            
+        except Exception as e:
+            print(f"Redis Pop Error: {e}")
+            return None
+
+    def trim(self, topic: str, size: int = 1):
+        """Trim stream to approximate size (for backward compatibility)"""
         self._ensure_connected()
         try:
-            self._redis.ltrim(topic, -size, -1) # Redis List Trim (Right is new)
-            # [신규] Limit 정보 저장 (모니터링용)
+            self._redis.xtrim(topic, maxlen=size, approximate=True)
             self._redis.set(f"edgeflow:meta:limit:{topic}", size)
         except Exception:
             pass
 
     def queue_size(self, topic: str) -> int:
-        """대기열 크기 반환"""
+        """Return stream length"""
         self._ensure_connected()
         try:
-            return self._redis.llen(topic)
+            return self._redis.xlen(topic)
         except Exception:
             return 0
 
     def get_queue_stats(self) -> Dict[str, Dict[str, int]]:
-        """모든 큐 상태 반환"""
+        """Return stats for all tracked streams"""
         self._ensure_connected()
         stats = {}
         try:
-            # 1. 모든 키 스캔 (최적화 필요하지만 일단 keys)
-            # 실제 큐 이름 패턴이 명확하지 않으므로, known topics를 관리하거나 규칙 필요
-            # 여기서는 간단히 limit 메타데이터가 있는 토픽만 조회하는 전략 사용
             meta_keys = self._redis.keys("edgeflow:meta:limit:*")
             
             for key in meta_keys:
@@ -72,36 +134,28 @@ class RedisBroker(BrokerInterface):
                 topic = key_str.replace("edgeflow:meta:limit:", "")
                 
                 limit_bytes = self._redis.get(key)
-                limit = int(limit_bytes) if limit_bytes else 0
-                current = self._redis.llen(topic)
+                limit = int(limit_bytes) if limit_bytes else self.maxlen
+                current = self._redis.xlen(topic)
                 
                 stats[topic] = {"current": current, "max": limit}
         except Exception as e:
             print(f"Redis Stats Error: {e}")
         return stats
 
-    def pop(self, topic: str, timeout: int=0):
-        """데이터 가져오기 (Consumer) - Blocking"""
-        self._ensure_connected()
-        try:
-            # blpop은 (key, value) 튜플을 반환하므로 value([1])만 리턴
-            res = self._redis.blpop(topic, timeout=timeout)
-            return res[1] if res else None
-        except Exception as e:
-            print(f"Redis Pop Error: {e}")
-            return None
-
     # ========== Serialization Protocol ==========
     
     def to_config(self) -> dict:
-        """멀티프로세싱용 설정 딕셔너리 반환"""
         return {
             "__class_path__": f"{self.__class__.__module__}.{self.__class__.__name__}",
             "host": self.host,
-            "port": self.port
+            "port": self.port,
+            "maxlen": self.maxlen
         }
     
     @classmethod
     def from_config(cls, config: dict) -> 'RedisBroker':
-        """설정으로부터 인스턴스 생성"""
-        return cls(host=config.get("host"), port=config.get("port"))
+        return cls(
+            host=config.get("host"),
+            port=config.get("port"),
+            maxlen=config.get("maxlen", 100)
+        )

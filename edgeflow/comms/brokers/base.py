@@ -32,6 +32,14 @@ class BrokerInterface(ABC):
         """모든 대기열의 상태(current, max)를 반환합니다."""
         pass
     
+    def reset(self):
+        """
+        브로커의 상태를 초기화합니다 (선택적 구현).
+        - 예: Redis FLUSHALL, 파일 삭제 등
+        - 시스템 시작 시 메인 프로세스에서 단 한 번 호출됩니다.
+        """
+        pass
+    
     # ========== Serialization Protocol (Multiprocessing Support) ==========
     
     @abstractmethod

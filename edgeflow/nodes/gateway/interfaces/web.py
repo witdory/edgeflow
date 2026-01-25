@@ -140,8 +140,6 @@ class WebInterface(BaseInterface):
                         data = self.buffers[topic].pop()
 
                 if data:
-                    # DEBUG: Confirm yield
-                    print(f"DEBUG: Yield {topic} {len(data)}", flush=True)
                     yield (b'--frameboundary\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + data + b'\r\n')
                     wait_time = 0.001 if self.buffer_delay == 0.0 else 0.01
