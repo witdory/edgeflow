@@ -93,7 +93,7 @@ No huge imports! Define your system layout using lightweight paths.
 from edgeflow import System
 
 # Initialize System with Broker Config
-sys = System("my-robot", broker_config={"host": "localhost", "port": 6379})
+sys = System("my-robot", broker=DualRedisBroker())
 
 # Lazy Loading: Class is NOT imported here
 cam = sys.node("nodes/camera", fps=30)
