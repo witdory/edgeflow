@@ -53,6 +53,7 @@ class TcpHandler:
             # 3. [Framing] 길이 헤더 추가 (4 bytes)
             length_header = struct.pack('>I', len(packet_body))
             
+            # print(f"DEBUG: TcpHandler sending topic={frame.meta.get('topic')} len={len(packet_body)}")
             self.sock.sendall(length_header + packet_body)
 
         except (BrokenPipeError, ConnectionResetError):

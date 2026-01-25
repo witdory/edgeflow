@@ -3,7 +3,7 @@
 Edgeflow v0.2.0 Example - QoS-based Stream Architecture
 """
 
-from edgeflow import System, QoS
+from edgeflow import System, QoS, run
 from edgeflow.comms import DualRedisBroker
 
 # System 초기화 (broker 의존성 주입)
@@ -33,4 +33,4 @@ if __name__ == "__main__":
     print(f" - AI Result  : http://<NODE-IP>:30080/video/yolo")
     print("\n🚀 Starting EdgeFlow...")
     
-    sys.run()
+    run(sys)

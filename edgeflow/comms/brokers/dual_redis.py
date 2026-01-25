@@ -33,6 +33,7 @@ class DualRedisBroker(BrokerInterface):
         self.ctrl_redis = redis.Redis(host=ctrl_host, port=ctrl_port)
         self.data_redis = self._connect_data_redis(data_host, data_port, ctrl_port)
         self._consumer_groups = set()
+        self._topic_last_id = {}  # Track last seen ID per topic for deduplication
 
     def reset(self):
         """
@@ -43,6 +44,7 @@ class DualRedisBroker(BrokerInterface):
             self.ctrl_redis.flushall()
             if self.ctrl_redis != self.data_redis:
                 self.data_redis.flushall()
+            self._topic_last_id.clear()
             print("🧹 [DualRedis] System Reset: FLUSHALL executed")
         except Exception as e:
             print(f"⚠️ [DualRedis] Failed to reset: {e}")
@@ -86,18 +88,22 @@ class DualRedisBroker(BrokerInterface):
 
         # Extract frame_id from header
         frame_id = struct.unpack('!I', frame_bytes[:4])[0]
-        
-        # 1. [Data Plane] Store heavy data
         data_key = f"{topic}:data:{frame_id}"
-        self.data_redis.set(data_key, frame_bytes, ex=60)  # 60s TTL for slow consumers
         
-        # 2. [Control Plane] Add frame_id to stream
-        self.ctrl_redis.xadd(
-            topic, 
-            {'frame_id': str(frame_id)}, 
-            maxlen=self.maxlen, 
-            approximate=True
-        )
+        # Optimization: If Ctrl and Data are same instance, use single pipeline
+        if self.ctrl_redis == self.data_redis:
+            pipe = self.ctrl_redis.pipeline()
+            pipe.set(data_key, frame_bytes, ex=60)
+            pipe.xadd(topic, {'frame_id': str(frame_id)}, maxlen=self.maxlen, approximate=True)
+            pipe.execute()
+        else:
+            # Separate instances: Push Data (Async-like) then Ctrl
+            # Note: We can't pipeline across different connections.
+            # But we can pipeline Data push to reduce RTT if multiple ops were needed.
+            # For now, we perform sequential ops.
+            # TODO: Make data push async?
+            self.data_redis.set(data_key, frame_bytes, ex=60)
+            self.ctrl_redis.xadd(topic, {'frame_id': str(frame_id)}, maxlen=self.maxlen, approximate=True)
 
     def pop(self, topic, timeout=1, group="default", consumer="worker"):
         """
@@ -143,29 +149,46 @@ class DualRedisBroker(BrokerInterface):
 
     def pop_latest(self, topic, timeout=1):
         """
-        Read the LATEST message only (REALTIME mode).
-        Skips all older messages - best for real-time processing.
+        Read the LATEST UNIQUE message (REALTIME mode).
+        - Dedplicates frames: Returns None if no NEW frame exists
+        - Efficient waiting: Blocks until new data arrives
         """
         try:
-            # Get the latest entry from stream
-            entries = self.ctrl_redis.xrevrange(topic, count=1)
-            if not entries:
-                # No entries, wait for new one
-                import time
-                time.sleep(timeout)
+            start_time = time.time()
+            
+            while True:
+                # 1. Get current tip
                 entries = self.ctrl_redis.xrevrange(topic, count=1)
-                if not entries:
+                
+                if entries:
+                    msg_id, fields = entries[0]
+                    last_seen = self._topic_last_id.get(topic)
+                    
+                    if msg_id != last_seen:
+                        # New frame found!
+                        self._topic_last_id[topic] = msg_id
+                        frame_id = fields.get(b'frame_id', b'').decode('utf-8')
+                        data_key = f"{topic}:data:{frame_id}"
+                        raw_data = self.data_redis.get(data_key)
+                        return raw_data if raw_data else None
+                
+                # Check timeout
+                elapsed = time.time() - start_time
+                remaining = timeout - elapsed
+                if remaining <= 0:
                     return None
-            
-            msg_id, fields = entries[0]
-            frame_id = fields.get(b'frame_id', b'').decode('utf-8')
-            
-            # Fetch actual data
-            data_key = f"{topic}:data:{frame_id}"
-            raw_data = self.data_redis.get(data_key)
-            
-            return raw_data if raw_data else None
-            
+                
+                # 2. Wait for NEW data using XREAD with '$' (special ID for "new items only")
+                # This blocks efficiently until something is added.
+                try:
+                    block_ms = int(remaining * 1000)
+                    self.ctrl_redis.xread({topic: '$'}, count=1, block=block_ms)
+                except redis.exceptions.ResponseError:
+                    # Stream might not exist yet
+                    time.sleep(0.1)
+                
+                # Loop continues -> xrevrange again to get the absolute latest
+                
         except Exception as e:
             print(f"DualRedis PopLatest Error: {e}")
             return None

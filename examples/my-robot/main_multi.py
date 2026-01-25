@@ -3,7 +3,7 @@
 Multi-System Example - Realtime + Logging with QoS
 """
 
-from edgeflow import System, QoS, run_all
+from edgeflow import System, QoS, run
 from edgeflow.comms import DualRedisBroker
 
 # ============================================================
@@ -30,5 +30,5 @@ if __name__ == "__main__":
     print(f" - Logging:  camera -> logger (QoS.DURABLE)")
     print("\n🚀 Starting EdgeFlow (Multi-System)...")
     
-    # run_all(sys, logger)
-    run_all(sys)
+    sys.run()
+    #run(sys) #if using multi Systems

@@ -112,6 +112,11 @@ class WebInterface(BaseInterface):
         # Gateway가 이 함수를 호출해서 데이터를 넣어줌
         async with self.lock:
             topic = frame.meta.get("topic", "default")
+            # print(f"DEBUG: Frame received on topic '{topic}'", flush=True) # Too noisy
+            
+            if topic not in self.buffers:
+                 print(f"🌟 [WebInterface] New Topic Detected: {topic}", flush=True)
+
             self.buffers[topic].push(frame)
             self.frame_counts[topic] += 1  # [신규] FPS 카운트
 

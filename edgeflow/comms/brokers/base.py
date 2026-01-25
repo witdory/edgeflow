@@ -16,6 +16,15 @@ class BrokerInterface(ABC):
     def pop(self, topic: str, timeout: int = 0) -> bytes | None:
         """브로커에서 데이터를 팝합니다."""
         pass
+        
+    @abstractmethod
+    def pop_latest(self, topic: str, timeout: int = 0) -> bytes | None:
+        """
+        [QoS: REALTIME] 가장 최신의 데이터만 가져옵니다.
+        - 오래된 데이터는 스킵합니다.
+        - 중복된 데이터(이미 읽은 frame_id)는 반환하지 않아야 합니다.
+        """
+        pass
     
     @abstractmethod
     def trim(self, topic: str, size: int):

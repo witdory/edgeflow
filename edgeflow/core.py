@@ -115,73 +115,10 @@ class System:
 
     def run(self):
         """
-        [Hybrid Run Mode]
-        1. --node <name> -> Run single node (distributed)
-        2. No args -> Run all nodes in MULTI-PROCESS mode (local simulation)
+        Start the System execution (blocking)
+        - Proxy to the top-level run() function
         """
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--node", help="Run specific node only")
-        args, unknown = parser.parse_known_args()
-
-        target_name = args.node
-
-        # [Mode 1: Distributed] python main.py --node cam
-        # In distributed mode, we assume the environment (Docker) is set up.
-        # We can just instantiate and run in THIS process.
-        if target_name:
-            # We need to instantiate just THIS node
-            if target_name not in self.specs:
-                print(f"❌ Node '{target_name}' not found. Available: {list(self.specs.keys())}")
-                return
-
-            spec = self.specs[target_name]
-            # wiring resolution relative to this node
-            print(f"▶️ [Distributed] Launching single node: {target_name}")
-            
-            # Using the injected broker object directly
-            cls = self._load_node_class(spec.path)
-            node = cls(broker=self.broker, **spec.config)
-            node.name = target_name
-            
-            # Apply wiring (We need to resolve all links to find MY outputs)
-            self._apply_wiring_for_node(node, self.broker)
-            
-            node.execute()
-
-        # [Mode 2: Local Simulation (Multiprocessing)] python main.py
-        else:
-            print(f"▶️ [Local] Launching ALL nodes ({len(self.specs)}) in separate processes")
-            
-            # [Reset Broker State]
-            if hasattr(self.broker, 'reset'):
-                self.broker.reset()
-                
-            import multiprocessing
-            
-            processes = []
-            
-            # Extract config from broker using the serialization protocol
-            broker_config = self.broker.to_config()
-            
-            for name, spec in self.specs.items():
-                # Prepare wiring config (targets) for this specific node
-                wiring_config = self._resolve_wiring_config(name)
-                
-                p = multiprocessing.Process(
-                    target=self._run_node_process,
-                    args=(name, spec.path, spec.config, broker_config, wiring_config)
-                )
-                p.start()
-                processes.append(p)
-
-            try:
-                while True:
-                    time.sleep(0.5)
-            except KeyboardInterrupt:
-                print("\n👋 System Shutdown - Stopping all processes...")
-                for p in processes:
-                    p.terminate()
-                sys.exit(0)
+        run(self)
 
     def _resolve_wiring_config(self, node_name: str) -> Dict[str, Any]:
         """Resolve wiring for a specific node into serializable config"""
@@ -236,6 +173,7 @@ class System:
                 node.input_topics.append({'topic': topic, 'qos': qos})
                 
         # Outputs
+        redis_topics = set()
         for out in wiring['outputs']:
             if out['protocol'] == 'tcp':
                 # Gateway connection
@@ -248,8 +186,13 @@ class System:
             else:
                 # Redis connection - topic is now just source name
                 topic = node.name
-                handler = RedisHandler(broker, topic, queue_size=out['queue_size'])
-                node.output_handlers.append(handler)
+                
+                # Deduplicate: Only add one RedisHandler per topic
+                if topic not in redis_topics:
+                    handler = RedisHandler(broker, topic, queue_size=out['queue_size'])
+                    node.output_handlers.append(handler)
+                    redis_topics.add(topic)
+                
                 print(f"🔗 [Stream] {node.name} --(QoS:{out.get('qos', 'REALTIME').name if hasattr(out.get('qos'), 'name') else 'REALTIME'})--> {out['target']}")
 
     @staticmethod
@@ -304,13 +247,12 @@ class System:
 EdgeApp = System
 
 
-def run_all(*systems: System):
+def run(*systems: System):
     """
-    Run multiple Systems together (multi-broker support)
+    Run one or multiple Systems (Entry Point)
     
-    - Merges all nodes from all Systems
-    - Deduplicates nodes (same path = same node)
-    - Each node gets handlers from ALL systems that reference it
+    - Single System: run(sys)
+    - Multi System:  run(sys1, sys2)
     """
     import multiprocessing
     
@@ -392,7 +334,7 @@ def run_all(*systems: System):
         p.start()
         processes.append(p)
     
-    print(f"▶️ [Multi-System] Launched {len(processes)} nodes")
+    print(f"▶️ [EdgeFlow] Launching {len(processes)} nodes from {len(systems)} system(s)")
     
     try:
         while True:

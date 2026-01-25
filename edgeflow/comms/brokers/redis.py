@@ -142,6 +142,56 @@ class RedisBroker(BrokerInterface):
             print(f"Redis Stats Error: {e}")
         return stats
 
+    
+    def __init__(self, host=None, port=None, maxlen=100):
+        self.host = host or os.getenv('REDIS_HOST', 'localhost')
+        self.port = port or int(os.getenv('REDIS_PORT', 6379))
+        self.maxlen = maxlen
+        self._redis = None
+        self._consumer_groups = set()
+        self._topic_last_id = {}  # Track last seen ID per topic
+
+    def pop_latest(self, topic: str, timeout: int = 1) -> Optional[bytes]:
+        """
+        Read the LATEST UNIQUE message (REALTIME mode).
+        - Dedplicates frames: Returns None if no NEW frame exists
+        - Efficient waiting: Blocks until new data arrives
+        """
+        self._ensure_connected()
+        try:
+            start_time = time.time()
+            
+            while True:
+                # 1. Get current tip
+                entries = self._redis.xrevrange(topic, count=1)
+                
+                if entries:
+                    msg_id, fields = entries[0]
+                    last_seen = self._topic_last_id.get(topic)
+                    
+                    if msg_id != last_seen:
+                        # New frame found!
+                        self._topic_last_id[topic] = msg_id
+                        data = fields.get(b'data')
+                        return data
+                
+                # Check timeout
+                elapsed = time.time() - start_time
+                remaining = timeout - elapsed
+                if remaining <= 0:
+                    return None
+                
+                # 2. Wait for NEW data using XREAD with '$'
+                try:
+                    block_ms = int(remaining * 1000)
+                    self._redis.xread({topic: '$'}, count=1, block=block_ms)
+                except redis.exceptions.ResponseError:
+                    time.sleep(0.1)
+            
+        except Exception as e:
+            print(f"Redis PopLatest Error: {e}")
+            return None
+
     # ========== Serialization Protocol ==========
     
     def to_config(self) -> dict:
