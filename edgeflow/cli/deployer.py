@@ -4,6 +4,7 @@
 import time
 import os
 import yaml
+import json
 import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -209,7 +210,8 @@ def deploy_to_k8s(
                 "DATA_REDIS_PORT": str(DATA_REDIS_PORT),
                 "GATEWAY_HOST": f"gateway-svc.{namespace}.svc.cluster.local",
                 "GATEWAY_TCP_PORT": str(GATEWAY_TCP_PORT),
-                "NODE_NAME": name
+                "NODE_NAME": name,
+                "EDGEFLOW_WIRING": json.dumps(system._resolve_wiring_config(name))
             }
         )
         manifest = yaml.safe_load(yaml_str)

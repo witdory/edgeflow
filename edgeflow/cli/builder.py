@@ -32,7 +32,7 @@ RUN apt-get update && apt-get install -y \\
     && rm -rf /var/lib/apt/lists/*
 
 # Install edgeflow framework from GitHub (Cache-busted)
-RUN uv pip install --system "git+https://github.com/seolgugu/edgeflow.git"  # v=20260128-5
+RUN uv pip install --system "git+https://github.com/seolgugu/edgeflow.git"  # v=20260128-6
 
 # Copy ONLY this specific node folder (lightweight image)
 COPY {node_path}/ /app/{node_path}/
