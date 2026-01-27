@@ -16,8 +16,10 @@ def run_node(module_name):
     node_class = None
     for name, obj in inspect.getmembers(mod):
         if inspect.isclass(obj) and issubclass(obj, EdgeNode) and obj is not EdgeNode:
-            node_class = obj
-            break
+            # Only pick class defined in this module (ignore imported base classes)
+            if obj.__module__ == mod.__name__:
+                node_class = obj
+                break
     
     if not node_class:
         print(f"❌ No EdgeNode subclass found in '{module_name}'")
