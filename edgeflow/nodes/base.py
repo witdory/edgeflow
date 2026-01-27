@@ -22,6 +22,8 @@ class EdgeNode(ABC):
     def __init__(self, broker=None, **kwargs):
         self.running = True
         self.__dict__.update(kwargs)
+        if not hasattr(self, 'name'):
+            self.name = self.__class__.__name__
         self.hostname = os.getenv("HOSTNAME", "localhost")
         host = os.getenv("REDIS_HOST", "localhost")
         self.broker = broker
