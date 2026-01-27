@@ -12,7 +12,7 @@ dependencies = [
     "jinja2",
     "docker",
     "numpy",
-    "opencv-python",
+    "opencv-python-headless",
     "fastapi",
     "uvicorn",
     "websockets",
