@@ -28,7 +28,7 @@ spec:
             {% if env_vars %}
             {% for key, value in env_vars.items() %}
             - name: {{ key }}
-              value: "{{ value }}"
+              value: '{{ value }}'
             {% endfor %}
             {% endif %}
           
