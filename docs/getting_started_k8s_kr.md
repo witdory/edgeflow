@@ -61,6 +61,27 @@ cd edgeflow/examples/my-robot
 
 ## 4. 클러스터 배포 (Deploy)
 
+EdgeFlow는 노드의 역할(Gateway)이나 하드웨어 요구사항(GPU, Camera)에 따라 파드를 적절한 노드에 배치하기 위해 **Kubernetes Node Label**을 사용합니다.
+
+### 4-1. 노드 라벨링 (Node Labeling)
+
+배포 전, 각 노드에 적절한 라벨을 붙여야 파드가 정상적으로 스케줄링됩니다. (단일 노드 클러스터라면 한 노드에 모두 붙이면 됩니다.)
+
+```bash
+# Gateway용 라벨 (필수)
+kubectl label nodes <your-node-name> edgeflow.io/role=infra
+
+# Camera 노드용 (device='video0'로 설정된 경우)
+kubectl label nodes <your-node-name> edgeflow.io/device=video0
+
+# GPU/NPU 노드용 (device='gpu'로 설정된 경우)
+kubectl label nodes <your-node-name> edgeflow.io/device=gpu
+```
+
+> **Tip:** `<your-node-name>`은 `kubectl get nodes`로 확인할 수 있습니다.
+
+### 4-2. 배포 실행
+
 이제 `edgeflow deploy` 명령어로 클러스터에 배포합니다. `--registry` 옵션은 필수입니다.
 
 ```bash
