@@ -15,7 +15,7 @@ class ProducerNode(EdgeNode):
     """데이터를 생성하여 다운스트림으로 전송하는 노드"""
     node_type = "producer"
     
-    def __init__(self, broker, fps=30, topic="default", queue_size=1, **kwargs):
+    def __init__(self, broker=None, fps=30, topic="default", queue_size=1, **kwargs):
         super().__init__(broker, **kwargs)
         self.fps = fps
         self.queue_size = queue_size

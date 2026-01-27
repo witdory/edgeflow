@@ -19,7 +19,7 @@ spec:
         - name: main
           image: {{ image }}
           {# Per-node image: run node module directly #}
-          command: ["python", "-m", "{{ node_module }}"]
+          command: ["python", "-m", "edgeflow.run", "{{ node_module }}"]
           imagePullPolicy: Always
           env:
             - name: PYTHONUNBUFFERED

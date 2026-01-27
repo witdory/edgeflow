@@ -16,7 +16,7 @@ class ConsumerNode(EdgeNode):
     """업스트림에서 데이터를 받아 처리하는 노드"""
     node_type = "consumer"
     
-    def __init__(self, broker, replicas=1, **kwargs):
+    def __init__(self, broker=None, replicas=1, **kwargs):
         super().__init__(broker=broker, **kwargs)
         self.replicas = replicas
 
