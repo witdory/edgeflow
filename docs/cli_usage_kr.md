@@ -82,6 +82,17 @@ edgeflow logs [NODE_NAME] [OPTIONS]
 edgeflow logs camera-node
 ```
 
+### 4. 업데이트 (Upgrade)
+
+EdgeFlow 프레임워크를 최신 버전으로 자가 업데이트합니다. (`uv` 도구 활용)
+
+```bash
+edgeflow upgrade
+```
+
+**동작:**
+- `uv tool install --force git+https://github.com/seolgugu/edgeflow.git` 명령어를 실행하여 최신 코드를 받아옵니다.
+
 ---
 
 ## 📂 프로젝트 구조 예시

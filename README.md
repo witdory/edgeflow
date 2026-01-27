@@ -100,6 +100,9 @@ edgeflow --help
 
 # Deploy to Kubernetes
 edgeflow deploy main.py --registry localhost:5000
+
+# Upgrade Framework
+edgeflow upgrade
 ```
 
 ---

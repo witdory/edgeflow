@@ -100,6 +100,9 @@ edgeflow --help
 
 # Kubernetes 배포
 edgeflow deploy main.py --registry localhost:5000
+
+# 프레임워크 업데이트
+edgeflow upgrade
 ```
 
 ---
